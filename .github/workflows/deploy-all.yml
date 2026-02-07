@@ -1,0 +1,18 @@
+# Deploy both Web and API to Azure. Runs on push to main (any path) or manual dispatch.
+# Uses the same secrets/variables as deploy-web.yml and deploy-api.yml.
+
+name: Deploy All (Web + API)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy-web:
+    uses: ./.github/workflows/deploy-web.yml
+    secrets: inherit
+
+  deploy-api:
+    uses: ./.github/workflows/deploy-api.yml
+    secrets: inherit

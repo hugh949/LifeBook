@@ -1,0 +1,26 @@
+# Env (keep .env.example)
+.env
+.env.local
+*.local
+
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build / runtime
+.next/
+out/
+*.egg-info/
+dist/
+
+# IDE / OS
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# Docker
+pgdata/

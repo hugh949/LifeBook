@@ -1,0 +1,14 @@
+# Optional: use when you want hot reload while developing.
+# Run: docker compose up --build
+# Edit code in apps/web and services/api; changes apply without rebuilding.
+
+services:
+  api:
+    volumes:
+      - ./services/api/app:/app/app
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+
+  web:
+    volumes:
+      - ./apps/web/src:/app/src
+      - ./apps/web/public:/app/public

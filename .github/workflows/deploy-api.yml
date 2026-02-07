@@ -1,0 +1,65 @@
+# Deploy FastAPI (LifeBook API) to Azure Container Apps.
+# Builds Docker image from services/api, pushes to ACR, updates Container App.
+# All Azure resources must be in West US 3 (westus3).
+#
+# GitHub secrets:
+#   AZURE_CREDENTIALS - JSON from: az ad sp create-for-rbac --sdk-auth
+#     (Contributor on resource group + AcrPush on ACR, or use one SP with both)
+#
+# GitHub variables (or set in workflow):
+#   AZURE_RESOURCE_GROUP  - e.g. rg-lifebook-v1
+#   AZURE_ACR_NAME       - e.g. lifebookv1acr (no .azurecr.io)
+#   AZURE_CONTAINER_APP  - e.g. aca-lifebook-api-v1
+#   AZURE_LOCATION       - (optional) default westus3 (West US 3)
+
+name: Deploy API (Azure Container Apps)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/api/**"
+      - ".github/workflows/deploy-api.yml"
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'rg-lifebook-v1' }}
+  ACR_NAME: ${{ vars.AZURE_ACR_NAME || 'lifebookv1acr' }}
+  CONTAINER_APP: ${{ vars.AZURE_CONTAINER_APP || 'aca-lifebook-api-v1' }}
+  AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'westus3' }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to ACR
+        run: |
+          az acr login --name ${{ env.ACR_NAME }}
+        # Service principal in AZURE_CREDENTIALS must have AcrPush on the ACR (or Contributor on the ACR resource)
+
+      - name: Build and push image
+        run: |
+          IMAGE="${{ env.ACR_NAME }}.azurecr.io/lifebook-api:${{ github.sha }}"
+          docker build -t "$IMAGE" ./services/api
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+
+      - name: Deploy to Container Apps
+        run: |
+          az containerapp update \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.IMAGE }}

@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: lifebook
+      POSTGRES_USER: lifebook
+      POSTGRES_PASSWORD: lifebook
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build: ./services/api
+    env_file:
+      - ./.env
+    environment:
+      DATABASE_URL: "postgresql://lifebook:lifebook@db:5432/lifebook"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+  web:
+    build: ./apps/web
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: "/api"
+      API_UPSTREAM: "http://api:8000"
+      NEXT_PUBLIC_DEFAULT_LANGUAGE: "auto"
+      NEXT_PUBLIC_SUPPORTED_LANGUAGES: "en,zh-yue,zh,es,ur"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

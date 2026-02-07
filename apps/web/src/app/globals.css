@@ -1,0 +1,194 @@
+/* LifeBook — warm, memory-first design */
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap");
+
+:root {
+  --bg: #faf8f5;
+  --bg-card: #ffffff;
+  --ink: #1f1f1f;
+  --ink-muted: #5c5c5c;
+  --ink-faint: #8a8a8a;
+  --primary: #1c3d4e;
+  --primary-hover: #2a5268;
+  --accent: #c9a227;
+  --accent-soft: #f5ecd2;
+  --success: #1a6b4b;
+  --success-bg: #e8f5ef;
+  --error: #b91c1c;
+  --error-bg: #fef2f2;
+  --border: #e8e4de;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 2px 12px rgba(28, 61, 78, 0.06);
+  --shadow-hover: 0 8px 24px rgba(28, 61, 78, 0.1);
+  --font-sans: "Outfit", system-ui, sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
+  --touch: 44px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--bg);
+  min-height: 100vh;
+}
+
+a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 500;
+  cursor: pointer;
+  pointer-events: auto;
+}
+a:hover {
+  text-decoration: underline;
+}
+button,
+[role="button"],
+.btn {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* Layout */
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-nav {
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.app-nav a {
+  cursor: pointer;
+  pointer-events: auto;
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 500;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+}
+.app-nav a:hover {
+  background: var(--accent-soft);
+  text-decoration: none;
+}
+.app-nav .brand {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.25rem;
+  color: var(--primary);
+}
+
+.app-main {
+  flex: 1;
+  padding: 24px 20px 48px;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+  position: relative;
+  z-index: 1;
+}
+.app-nav {
+  position: relative;
+  z-index: 2;
+}
+
+/* Cards */
+.card {
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+.card:hover {
+  box-shadow: var(--shadow-hover);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--touch);
+  padding: 12px 24px;
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: var(--radius);
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--primary);
+  color: white;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* Typography */
+.page-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 0.5rem;
+}
+.page-lead {
+  font-size: 1.1rem;
+  color: var(--ink-muted);
+  margin: 0 0 1.5rem;
+}
+
+/* Empty / states */
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--ink-muted);
+}
+.empty-state .icon {
+  font-size: 3rem;
+  margin-bottom: 16px;
+  opacity: 0.6;
+}
+
+.hide {
+  display: none !important;
+}
