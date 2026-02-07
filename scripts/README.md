@@ -12,6 +12,11 @@ Push LifeBook to GitHub first (commit if needed, then push to `main`).
 - Asks to commit any uncommitted changes, then pushes to `origin main`.
 - After push, Azure deploy runs automatically via GitHub Actions (if configured).
 
+**If you see "Repository not found":**
+1. **Create the repo on GitHub first:** [github.com/new](https://github.com/new) → name **LifeBook** → leave "Add a README" **unchecked** → Create.
+2. **Check URL:** `git remote -v` should show your repo. Fix: `git remote set-url origin https://github.com/YOUR_USERNAME/LifeBook.git`
+3. **Use the right account:** When Git asks for credentials, use the GitHub account that **owns** the repo (username + [Personal Access Token](https://github.com/settings/tokens) as password).
+
 ---
 
 ## deploy-to-azure.sh
