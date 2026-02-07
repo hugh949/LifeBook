@@ -111,12 +111,6 @@ jobs:
             echo "Web App $APP already exists"
           fi
 
-      - name: Restart Web App (clear any stuck deployment lock)
-        run: |
-          az webapp restart -g "${{ env.RESOURCE_GROUP }}" -n "${{ env.AZURE_WEBAPP_NAME }}"
-          echo "Waiting 15s for app to release locks..."
-          sleep 15
-
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
