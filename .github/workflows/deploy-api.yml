@@ -132,7 +132,7 @@ jobs:
             echo "Creating Container App $APP"
             az containerapp create -g "$RG" -n "$APP" --environment "$CA_ENV" \
               --image mcr.microsoft.com/azuredocs/containerapps-helloworld:latest \
-              --ingress external --target-port 8000
+              --ingress external --target-port 80
             echo "Add DATABASE_URL, AZURE_STORAGE_*, OPENAI_API_KEY, CORS_ALLOW_ORIGINS in Azure Portal → Container App → Configuration"
           else
             echo "Container App $APP already exists"
@@ -188,6 +188,9 @@ jobs:
           AZURE_STORAGE_CONTAINER_AUDIO: ${{ secrets.AZURE_STORAGE_CONTAINER_AUDIO }}
         run: |
           set -e
+          # Brief wait so any just-finished operation can clear (was 2 min; 30s is enough when app is idle)
+          echo "Waiting 30s before container app update..."
+          sleep 30
           # Build --set-env-vars from non-empty GitHub Secrets (so Container App gets them at runtime)
           ENV_VARS=()
           [ -n "$DATABASE_URL" ] && ENV_VARS+=( "DATABASE_URL=$DATABASE_URL" )
@@ -197,15 +200,19 @@ jobs:
           [ -n "$CORS_ALLOW_ORIGINS" ] && ENV_VARS+=( "CORS_ALLOW_ORIGINS=$CORS_ALLOW_ORIGINS" )
           [ -n "$AZURE_STORAGE_CONTAINER_PHOTOS" ] && ENV_VARS+=( "AZURE_STORAGE_CONTAINER_PHOTOS=$AZURE_STORAGE_CONTAINER_PHOTOS" )
           [ -n "$AZURE_STORAGE_CONTAINER_AUDIO" ] && ENV_VARS+=( "AZURE_STORAGE_CONTAINER_AUDIO=$AZURE_STORAGE_CONTAINER_AUDIO" )
+          ENV_VARS+=( "PORT=80" )
+          # Ingress must target port 80 to match app (Azure Container Apps expects 80 unless overridden)
+          az containerapp ingress update -g ${{ env.RESOURCE_GROUP }} -n ${{ env.CONTAINER_APP }} --target-port 80 --output none
           UPDATE_ARGS=( --name ${{ env.CONTAINER_APP }} --resource-group ${{ env.RESOURCE_GROUP }} --image ${{ env.IMAGE }} )
           [ ${#ENV_VARS[@]} -gt 0 ] && UPDATE_ARGS+=( --set-env-vars "${ENV_VARS[@]}" )
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+          # Retry up to 30 times, 60s apart (~30 min total) when "operation in progress"
+          for attempt in $(seq 1 30); do
             if az containerapp update "${UPDATE_ARGS[@]}"; then
               echo "Deploy successful"
               exit 0
             fi
-            echo "Attempt $attempt: container app busy. Waiting 30s..."
-            sleep 30
+            echo "Attempt $attempt/30: container app busy. Waiting 60s..."
+            sleep 60
           done
-          echo "Deploy failed after 10 retries"
+          echo "Deploy failed after 30 retries. If this persists, restart the Container App in Azure Portal and re-run."
           exit 1
