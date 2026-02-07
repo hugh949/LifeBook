@@ -31,6 +31,7 @@ env:
   RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'rg-lifebook-v1' }}
   ACR_NAME: ${{ vars.AZURE_ACR_NAME || 'lifebookv1acr' }}
   CONTAINER_APP: ${{ vars.AZURE_CONTAINER_APP || 'aca-lifebook-api-v1' }}
+  CA_ENV: ${{ vars.AZURE_CONTAINER_APPS_ENV || 'acae-lifebook-v1' }}
   AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'westus3' }}
 
 jobs:
@@ -88,6 +89,55 @@ jobs:
         uses: azure/login@v2
         with:
           creds: ${{ steps.azcreds.outputs.creds }}
+
+      - name: Ensure API infrastructure exists
+        run: |
+          set -e
+          RG="${{ env.RESOURCE_GROUP }}"
+          ACR="${{ env.ACR_NAME }}"
+          CA_ENV="${{ env.CA_ENV }}"
+          APP="${{ env.CONTAINER_APP }}"
+          LOC="${{ env.AZURE_LOCATION }}"
+          # Create resource group if missing
+          if ! az group show -n "$RG" &>/dev/null; then
+            echo "Creating resource group $RG in $LOC"
+            az group create -n "$RG" -l "$LOC"
+          fi
+          # Create ACR if missing (name must be globally unique)
+          if ! az acr show -n "$ACR" &>/dev/null; then
+            echo "Creating ACR $ACR"
+            az acr create -g "$RG" -n "$ACR" --sku Basic -l "$LOC"
+          fi
+          # Create Container Apps environment if missing
+          if ! az containerapp env show -g "$RG" -n "$CA_ENV" &>/dev/null; then
+            echo "Creating Container Apps environment $CA_ENV"
+            az containerapp env create -g "$RG" -n "$CA_ENV" -l "$LOC"
+          fi
+          # Create Container App if missing (placeholder image; update step will set real image)
+          if ! az containerapp show -g "$RG" -n "$APP" &>/dev/null; then
+            echo "Creating Container App $APP"
+            az containerapp create -g "$RG" -n "$APP" --environment "$CA_ENV" \
+              --image mcr.microsoft.com/azuredocs/containerapps-helloworld:latest \
+              --ingress external --target-port 8000
+            echo "Add DATABASE_URL, AZURE_STORAGE_*, OPENAI_API_KEY, CORS_ALLOW_ORIGINS in Azure Portal → Container App → Configuration"
+          else
+            echo "Container App $APP already exists"
+          fi
+
+      - name: Ensure Container App can pull from ACR
+        run: |
+          set -e
+          RG="${{ env.RESOURCE_GROUP }}"
+          ACR="${{ env.ACR_NAME }}"
+          APP="${{ env.CONTAINER_APP }}"
+          # Enable system-assigned identity on the container app (idempotent)
+          az containerapp identity assign -g "$RG" -n "$APP" --system-assigned 2>/dev/null || true
+          sleep 5
+          PRINCIPAL_ID=$(az containerapp show -g "$RG" -n "$APP" --query "identity.principalId" -o tsv)
+          SUB_ID=$(az account show --query id -o tsv)
+          ACR_ID="/subscriptions/$SUB_ID/resourceGroups/$RG/providers/Microsoft.ContainerRegistry/registries/$ACR"
+          # Grant AcrPull so the app can pull our image (idempotent)
+          az role assignment create --assignee "$PRINCIPAL_ID" --role AcrPull --scope "$ACR_ID" 2>/dev/null || true
 
       - name: Login to ACR
         run: |
