@@ -47,6 +47,7 @@ If you have a `docker-compose.override.yml` in the repo (see below), the API and
 
 **After that:** Deployments are driven by **GitHub**. Push to `main` and the workflows build and deploy for you. No need to redeploy from your machine or the Azure Portal for routine releases.
 
+- **One command:** Run **`./scripts/deploy-to-azure.sh`** to commit (if needed), push to `main`, and get the link to watch the Azure workflow. See **`scripts/README.md`**.
 - **Automatic:** Push to `main` → **Deploy All** runs (web + API). Path-specific pushes run only **Deploy Web** or **Deploy API** when only that app changed.
 - **Manual:** **Actions** → **Deploy Web** / **Deploy API** / **Deploy All** → **Run workflow**.
 
