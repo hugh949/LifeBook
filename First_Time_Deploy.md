@@ -14,7 +14,7 @@ Do this once, in any order that respects dependencies. Prefer **Azure Portal** f
 |---|----------|-------------|--------|
 | 1 | **Resource group** | Create a resource group | Name e.g. `rg-lifebook-v1`, **Region: West US 3** |
 | 2 | **Storage account** | Create → Storage account | Same RG, **West US 3**. Create private containers: `photos`, `audio`. Note the **account name** (e.g. `lifebookv1prod`). You’ll need an **access key** for the API. |
-| 3 | **Azure Container Registry (ACR)** | Create → Container registry | Same RG, **West US 3**. Name e.g. `lifebookv1acr` (globally unique). Note the **Login server** (e.g. `lifebookv1acr.azurecr.io`). |
+| 3 | **Azure Container Registry (ACR)** | Create → Container registry | Same RG, **West US 3**. Name e.g. `lifebookv1acr`. Or run `./scripts/azure-create-acr.sh`. Then run `./scripts/azure-acr-grant-push.sh` to grant **LifeBook-GitHub** AcrPush (no Portal needed). |
 | 4 | **PostgreSQL Flexible Server** | Create → Azure Database for PostgreSQL Flexible Server | Same RG, **West US 3**. Create a server + database (e.g. `lifebook`). Note **host**, **user**, **password**; build `DATABASE_URL` = `postgresql://user:password@host:5432/lifebook` (use `postgresql+psycopg://...` if your driver needs it). |
 | 5 | **Container Apps environment** | Create → Container Apps → start with Environment | Same RG, **West US 3**. Name e.g. `acae-lifebook-v1`. |
 | 6 | **Container App (API)** | In the same environment, create a Container App | Name e.g. `aca-lifebook-api-v1`. Use **any public image** as placeholder (e.g. `mcr.microsoft.com/azuredocs/containerapps-helloworld:latest`). Ingress: **external**, port **8000**. Add env vars (see step 3 below). |

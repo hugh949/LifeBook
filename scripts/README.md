@@ -54,6 +54,37 @@ gh workflow run deploy-api.yml
 
 ---
 
+## azure-create-acr.sh
+
+Create the Azure Container Registry (ACR) so the API workflow can push images.
+
+**Usage:**
+```bash
+./scripts/azure-create-acr.sh
+```
+Creates `lifebookv1acr` in `rg-lifebook-v1` (West US 3). If that name is taken, run `ACR_NAME=myuniquename ./scripts/azure-create-acr.sh` and set GitHub variable **AZURE_ACR_NAME** to that name.
+
+After creating, grant the SP push access (no Portal needed):
+```bash
+./scripts/azure-acr-grant-push.sh
+```
+
+---
+
+## azure-acr-grant-push.sh
+
+Grant the **LifeBook-GitHub** service principal **AcrPush** on your ACR so GitHub Actions can push the API image. Use this if you can't or don't want to do it in the Portal.
+
+**Usage:**
+```bash
+./scripts/azure-acr-grant-push.sh
+```
+Uses ACR name `lifebookv1acr` and SP name `LifeBook-GitHub`. If your ACR has a different name: `ACR_NAME=myacr ./scripts/azure-acr-grant-push.sh`
+
+Requires that you have permission to create role assignments (e.g. Owner or User Access Administrator on the ACR or subscription).
+
+---
+
 ## run-local.sh
 
 Runs the app locally (e.g. Docker Compose). See repo root **README.md**.
