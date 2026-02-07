@@ -7,8 +7,11 @@
 #     az ad sp create-for-rbac --name "LifeBook-GitHub" --role contributor \
 #       --scopes /subscriptions/<SUB_ID>/resourceGroups/rg-lifebook-v1 --sdk-auth
 #     Workflow accepts both formats: clientId/clientSecret/subscriptionId/tenantId OR appId/password/tenant (subscriptionId required).
-#   Option B: four separate secrets (no AZURE_CREDENTIALS):
-#     AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, AZURE_CLIENT_SECRET
+#   Option B: AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, AZURE_CLIENT_SECRET
+#
+# Optional (synced to Container App on deploy; else set in Azure Portal):
+#   DATABASE_URL, AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_ACCOUNT_KEY, OPENAI_API_KEY, CORS_ALLOW_ORIGINS
+#   AZURE_STORAGE_CONTAINER_PHOTOS, AZURE_STORAGE_CONTAINER_AUDIO
 #
 # GitHub variables (or set in workflow):
 #   AZURE_RESOURCE_GROUP  - e.g. rg-lifebook-v1
@@ -175,13 +178,29 @@ jobs:
           exit 1
 
       - name: Deploy to Container Apps
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          AZURE_STORAGE_ACCOUNT_KEY: ${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CORS_ALLOW_ORIGINS: ${{ secrets.CORS_ALLOW_ORIGINS }}
+          AZURE_STORAGE_CONTAINER_PHOTOS: ${{ secrets.AZURE_STORAGE_CONTAINER_PHOTOS }}
+          AZURE_STORAGE_CONTAINER_AUDIO: ${{ secrets.AZURE_STORAGE_CONTAINER_AUDIO }}
         run: |
           set -e
+          # Build --set-env-vars from non-empty GitHub Secrets (so Container App gets them at runtime)
+          ENV_VARS=()
+          [ -n "$DATABASE_URL" ] && ENV_VARS+=( "DATABASE_URL=$DATABASE_URL" )
+          [ -n "$AZURE_STORAGE_ACCOUNT" ] && ENV_VARS+=( "AZURE_STORAGE_ACCOUNT=$AZURE_STORAGE_ACCOUNT" )
+          [ -n "$AZURE_STORAGE_ACCOUNT_KEY" ] && ENV_VARS+=( "AZURE_STORAGE_ACCOUNT_KEY=$AZURE_STORAGE_ACCOUNT_KEY" )
+          [ -n "$OPENAI_API_KEY" ] && ENV_VARS+=( "OPENAI_API_KEY=$OPENAI_API_KEY" )
+          [ -n "$CORS_ALLOW_ORIGINS" ] && ENV_VARS+=( "CORS_ALLOW_ORIGINS=$CORS_ALLOW_ORIGINS" )
+          [ -n "$AZURE_STORAGE_CONTAINER_PHOTOS" ] && ENV_VARS+=( "AZURE_STORAGE_CONTAINER_PHOTOS=$AZURE_STORAGE_CONTAINER_PHOTOS" )
+          [ -n "$AZURE_STORAGE_CONTAINER_AUDIO" ] && ENV_VARS+=( "AZURE_STORAGE_CONTAINER_AUDIO=$AZURE_STORAGE_CONTAINER_AUDIO" )
+          UPDATE_ARGS=( --name ${{ env.CONTAINER_APP }} --resource-group ${{ env.RESOURCE_GROUP }} --image ${{ env.IMAGE }} )
+          [ ${#ENV_VARS[@]} -gt 0 ] && UPDATE_ARGS+=( --set-env-vars "${ENV_VARS[@]}" )
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if az containerapp update \
-              --name ${{ env.CONTAINER_APP }} \
-              --resource-group ${{ env.RESOURCE_GROUP }} \
-              --image ${{ env.IMAGE }}; then
+            if az containerapp update "${UPDATE_ARGS[@]}"; then
               echo "Deploy successful"
               exit 0
             fi
