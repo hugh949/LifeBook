@@ -145,8 +145,17 @@ jobs:
           # Enable ACR admin user so we can pass credentials to the container app (reliable for CI)
           az acr update -g "$RG" -n "$ACR" --admin-enabled true --output none
           ACR_PASS=$(az acr credential show -g "$RG" -n "$ACR" --query "passwords[0].value" -o tsv)
-          # Register ACR with the container app using admin credentials (avoids MI propagation delays)
-          az containerapp registry set -g "$RG" -n "$APP" --server "$SERVER" --username "$ACR" --password "$ACR_PASS"
+          # Register ACR (retry when "operation in progress")
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if az containerapp registry set -g "$RG" -n "$APP" --server "$SERVER" --username "$ACR" --password "$ACR_PASS"; then
+              echo "Registry set successfully"
+              exit 0
+            fi
+            echo "Attempt $attempt: container app busy. Waiting 30s..."
+            sleep 30
+          done
+          echo "Registry set failed after 10 retries"
+          exit 1
 
       - name: Login to ACR
         run: |
@@ -162,7 +171,17 @@ jobs:
 
       - name: Deploy to Container Apps
         run: |
-          az containerapp update \
-            --name ${{ env.CONTAINER_APP }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --image ${{ env.IMAGE }}
+          set -e
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if az containerapp update \
+              --name ${{ env.CONTAINER_APP }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --image ${{ env.IMAGE }}; then
+              echo "Deploy successful"
+              exit 0
+            fi
+            echo "Attempt $attempt: container app busy. Waiting 30s..."
+            sleep 30
+          done
+          echo "Deploy failed after 10 retries"
+          exit 1
