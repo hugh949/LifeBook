@@ -1,5 +1,19 @@
 # Scripts
 
+## deploy-to-github.sh
+
+Push LifeBook to GitHub first (commit if needed, then push to `main`).
+
+**Usage:**
+```bash
+./scripts/deploy-to-github.sh
+```
+
+- Asks to commit any uncommitted changes, then pushes to `origin main`.
+- After push, Azure deploy runs automatically via GitHub Actions (if configured).
+
+---
+
 ## deploy-to-azure.sh
 
 Deploy LifeBook to Azure via GitHub Actions.
