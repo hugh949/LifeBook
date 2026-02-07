@@ -135,28 +135,6 @@ jobs:
             echo "Container App $APP already exists"
           fi
 
-      - name: Ensure Container App can pull from ACR
-        run: |
-          set -e
-          RG="${{ env.RESOURCE_GROUP }}"
-          ACR="${{ env.ACR_NAME }}"
-          APP="${{ env.CONTAINER_APP }}"
-          SERVER="${ACR}.azurecr.io"
-          # Enable ACR admin user so we can pass credentials to the container app (reliable for CI)
-          az acr update -g "$RG" -n "$ACR" --admin-enabled true --output none
-          ACR_PASS=$(az acr credential show -g "$RG" -n "$ACR" --query "passwords[0].value" -o tsv)
-          # Register ACR (retry when "operation in progress")
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if az containerapp registry set -g "$RG" -n "$APP" --server "$SERVER" --username "$ACR" --password "$ACR_PASS"; then
-              echo "Registry set successfully"
-              exit 0
-            fi
-            echo "Attempt $attempt: container app busy. Waiting 30s..."
-            sleep 30
-          done
-          echo "Registry set failed after 10 retries"
-          exit 1
-
       - name: Login to ACR
         run: |
           az acr login --name ${{ env.ACR_NAME }}
@@ -168,6 +146,33 @@ jobs:
           docker build -t "$IMAGE" ./services/api
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+
+      - name: Ensure Container App can pull from ACR
+        run: |
+          set -e
+          RG="${{ env.RESOURCE_GROUP }}"
+          ACR="${{ env.ACR_NAME }}"
+          APP="${{ env.CONTAINER_APP }}"
+          SERVER="${ACR}.azurecr.io"
+          # Skip if this registry is already configured (avoids "operation in progress" when not needed)
+          EXISTING=$(az containerapp show -g "$RG" -n "$APP" --query "properties.configuration.registries[?server=='$SERVER'].server" -o tsv 2>/dev/null || true)
+          if [ "$EXISTING" = "$SERVER" ]; then
+            echo "Registry $SERVER already configured, skipping"
+            exit 0
+          fi
+          # Enable ACR admin and set registry (after build so any prior operation may have finished)
+          az acr update -g "$RG" -n "$ACR" --admin-enabled true --output none
+          ACR_PASS=$(az acr credential show -g "$RG" -n "$ACR" --query "passwords[0].value" -o tsv)
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+            if az containerapp registry set -g "$RG" -n "$APP" --server "$SERVER" --username "$ACR" --password "$ACR_PASS"; then
+              echo "Registry set successfully"
+              exit 0
+            fi
+            echo "Attempt $attempt: container app busy. Waiting 60s..."
+            sleep 60
+          done
+          echo "Registry set failed after 20 retries"
+          exit 1
 
       - name: Deploy to Container Apps
         run: |
