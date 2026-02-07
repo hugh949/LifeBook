@@ -19,6 +19,8 @@ on:
 env:
   AZURE_WEBAPP_NAME: ${{ vars.AZURE_WEBAPP_NAME || 'app-lifebook-web-v1' }}
   RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'rg-lifebook-v1' }}
+  APP_SERVICE_PLAN: ${{ vars.AZURE_APP_SERVICE_PLAN || 'asp-lifebook-v1' }}
+  AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'westus3' }}
 
 jobs:
   build-and-deploy:
@@ -78,6 +80,31 @@ jobs:
         uses: azure/login@v2
         with:
           creds: ${{ steps.azcreds.outputs.creds }}
+
+      - name: Ensure Web App exists
+        run: |
+          set -e
+          RG="${{ env.RESOURCE_GROUP }}"
+          PLAN="${{ env.APP_SERVICE_PLAN }}"
+          APP="${{ env.AZURE_WEBAPP_NAME }}"
+          LOC="${{ env.AZURE_LOCATION }}"
+          # Create resource group if missing
+          if ! az group show -n "$RG" &>/dev/null; then
+            echo "Creating resource group $RG in $LOC"
+            az group create -n "$RG" -l "$LOC"
+          fi
+          # Create App Service Plan (Linux) if missing
+          if ! az appservice plan show -g "$RG" -n "$PLAN" &>/dev/null; then
+            echo "Creating App Service Plan $PLAN"
+            az appservice plan create -g "$RG" -n "$PLAN" --is-linux --sku B1 -l "$LOC"
+          fi
+          # Create Web App (Node 20) if missing
+          if ! az webapp show -g "$RG" -n "$APP" &>/dev/null; then
+            echo "Creating Web App $APP"
+            az webapp create -g "$RG" -n "$APP" -p "$PLAN" --runtime "NODE:20-lts" --startup-file "npm run start"
+          else
+            echo "Web App $APP already exists"
+          fi
 
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
