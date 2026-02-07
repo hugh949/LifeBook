@@ -142,18 +142,11 @@ jobs:
           ACR="${{ env.ACR_NAME }}"
           APP="${{ env.CONTAINER_APP }}"
           SERVER="${ACR}.azurecr.io"
-          # ACR must allow ARM tokens for managed identity pull
-          az acr config authentication-as-arm update -g "$RG" -r "$ACR" --status enabled 2>/dev/null || true
-          # Enable system-assigned identity on the container app (idempotent)
-          az containerapp identity assign -g "$RG" -n "$APP" --system-assigned 2>/dev/null || true
-          sleep 5
-          PRINCIPAL_ID=$(az containerapp show -g "$RG" -n "$APP" --query "identity.principalId" -o tsv)
-          SUB_ID=$(az account show --query id -o tsv)
-          ACR_ID="/subscriptions/$SUB_ID/resourceGroups/$RG/providers/Microsoft.ContainerRegistry/registries/$ACR"
-          # Grant AcrPull so the app can pull our image (idempotent)
-          az role assignment create --assignee "$PRINCIPAL_ID" --role AcrPull --scope "$ACR_ID" 2>/dev/null || true
-          # Register ACR with the container app and use system-assigned identity for pull
-          az containerapp registry set -g "$RG" -n "$APP" --server "$SERVER" --identity system
+          # Enable ACR admin user so we can pass credentials to the container app (reliable for CI)
+          az acr update -g "$RG" -n "$ACR" --admin-enabled true --output none
+          ACR_PASS=$(az acr credential show -g "$RG" -n "$ACR" --query "passwords[0].value" -o tsv)
+          # Register ACR with the container app using admin credentials (avoids MI propagation delays)
+          az containerapp registry set -g "$RG" -n "$APP" --server "$SERVER" --username "$ACR" --password "$ACR_PASS"
 
       - name: Login to ACR
         run: |
