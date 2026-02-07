@@ -2,9 +2,13 @@
 # Builds Docker image from services/api, pushes to ACR, updates Container App.
 # All Azure resources must be in West US 3 (westus3).
 #
-# GitHub secrets:
-#   AZURE_CREDENTIALS - JSON from: az ad sp create-for-rbac --sdk-auth
-#     (Contributor on resource group + AcrPush on ACR, or use one SP with both)
+# GitHub secrets (use ONE of these options):
+#   Option A: AZURE_CREDENTIALS = full JSON from:
+#     az ad sp create-for-rbac --name "LifeBook-GitHub" --role contributor \
+#       --scopes /subscriptions/<SUB_ID>/resourceGroups/rg-lifebook-v1 --sdk-auth
+#     Workflow accepts both formats: clientId/clientSecret/subscriptionId/tenantId OR appId/password/tenant (subscriptionId required).
+#   Option B: four separate secrets (no AZURE_CREDENTIALS):
+#     AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, AZURE_CLIENT_SECRET
 #
 # GitHub variables (or set in workflow):
 #   AZURE_RESOURCE_GROUP  - e.g. rg-lifebook-v1
@@ -39,10 +43,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Prepare Azure credentials
+        id: azcreds
+        run: |
+          if [ -n "$AZURE_CREDENTIALS" ]; then
+            echo 'creds<<CREDSEOF' >> $GITHUB_OUTPUT
+            node -e "
+              const raw = process.env.AZURE_CREDENTIALS;
+              let o = JSON.parse(raw);
+              const out = {
+                clientId: o.clientId || o.appId,
+                clientSecret: o.clientSecret || o.password,
+                subscriptionId: o.subscriptionId,
+                tenantId: o.tenantId || o.tenant
+              };
+              if (!out.clientId || !out.tenantId || !out.clientSecret) throw new Error('JSON must have clientId (or appId), tenantId (or tenant), clientSecret (or password), and subscriptionId');
+              console.log(JSON.stringify(out));
+            " >> $GITHUB_OUTPUT
+            echo '' >> $GITHUB_OUTPUT
+            echo 'CREDSEOF' >> $GITHUB_OUTPUT
+          else
+            echo 'creds<<CREDSEOF' >> $GITHUB_OUTPUT
+            node -e "console.log(JSON.stringify({clientId:process.env.CID,clientSecret:process.env.SECRET,subscriptionId:process.env.SID,tenantId:process.env.TID}))" >> $GITHUB_OUTPUT
+            echo 'CREDSEOF' >> $GITHUB_OUTPUT
+          fi
+        env:
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+          CID: ${{ secrets.AZURE_CLIENT_ID }}
+          SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          SID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          TID: ${{ secrets.AZURE_TENANT_ID }}
+
       - name: Azure Login
         uses: azure/login@v2
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          creds: ${{ steps.azcreds.outputs.creds }}
 
       - name: Login to ACR
         run: |

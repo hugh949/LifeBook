@@ -68,7 +68,8 @@ In your repo: **Settings → Secrets and variables → Actions**.
     --scopes /subscriptions/<YOUR_SUBSCRIPTION_ID>/resourceGroups/rg-lifebook-v1 \
     --sdk-auth
   ```
-  Then in Azure: **ACR** → **Access control (IAM)** → **Add role assignment** → **AcrPush** → assign to the app **LifeBook-GitHub** (the service principal you just created).
+  Then in Azure: **ACR** → **Access control (IAM)** → **Add role assignment** → **AcrPush** → assign to the app **LifeBook-GitHub** (the service principal you just created).  
+  **If login fails with "client-id and tenant-id not supplied":** Use `--sdk-auth` so the JSON has `clientId`, `clientSecret`, `subscriptionId`, `tenantId`. Or use four secrets instead: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_CLIENT_SECRET`.
 
 **Variables (optional):**  
 If you used different names, add: `AZURE_WEBAPP_NAME`, `AZURE_RESOURCE_GROUP`, `AZURE_ACR_NAME`, `AZURE_CONTAINER_APP`. Defaults are in the table in `Azure_Deployment_Appendix.md` § 11.
