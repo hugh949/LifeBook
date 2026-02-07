@@ -1,5 +1,6 @@
 # Deploy FastAPI (LifeBook API) to Azure Container Apps.
 # Builds Docker image from services/api, pushes to ACR, updates Container App.
+# Uses --cache-from previous image in ACR so base + pip layers are reused; only changed layers are pushed.
 # All Azure resources must be in West US 3 (westus3).
 #
 # GitHub secrets (use ONE of these options):
@@ -40,6 +41,7 @@ env:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
 
@@ -145,9 +147,16 @@ jobs:
 
       - name: Build and push image
         run: |
-          IMAGE="${{ env.ACR_NAME }}.azurecr.io/lifebook-api:${{ github.sha }}"
-          docker build -t "$IMAGE" ./services/api
+          ACR="${{ env.ACR_NAME }}"
+          REGISTRY="${ACR}.azurecr.io"
+          IMAGE="${REGISTRY}/lifebook-api:${{ github.sha }}"
+          IMAGE_LATEST="${REGISTRY}/lifebook-api:latest"
+          # Reuse previous image layers from ACR so we only push changed layers (base + pip deps already on Azure)
+          docker pull "$IMAGE_LATEST" || true
+          docker build --cache-from "$IMAGE_LATEST" -t "$IMAGE" ./services/api
           docker push "$IMAGE"
+          docker tag "$IMAGE" "$IMAGE_LATEST"
+          docker push "$IMAGE_LATEST"
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
       - name: Ensure Container App can pull from ACR
@@ -166,15 +175,15 @@ jobs:
           # Enable ACR admin and set registry (after build so any prior operation may have finished)
           az acr update -g "$RG" -n "$ACR" --admin-enabled true --output none
           ACR_PASS=$(az acr credential show -g "$RG" -n "$ACR" --query "passwords[0].value" -o tsv)
-          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
             if az containerapp registry set -g "$RG" -n "$APP" --server "$SERVER" --username "$ACR" --password "$ACR_PASS"; then
               echo "Registry set successfully"
               exit 0
             fi
-            echo "Attempt $attempt: container app busy. Waiting 60s..."
-            sleep 60
+            echo "Attempt $attempt: container app busy. Waiting 45s..."
+            sleep 45
           done
-          echo "Registry set failed after 20 retries"
+          echo "Registry set failed after 10 retries"
           exit 1
 
       - name: Deploy to Container Apps
@@ -205,14 +214,14 @@ jobs:
           az containerapp ingress update -g ${{ env.RESOURCE_GROUP }} -n ${{ env.CONTAINER_APP }} --target-port 80 --output none
           UPDATE_ARGS=( --name ${{ env.CONTAINER_APP }} --resource-group ${{ env.RESOURCE_GROUP }} --image ${{ env.IMAGE }} )
           [ ${#ENV_VARS[@]} -gt 0 ] && UPDATE_ARGS+=( --set-env-vars "${ENV_VARS[@]}" )
-          # Retry up to 30 times, 60s apart (~30 min total) when "operation in progress"
-          for attempt in $(seq 1 30); do
+          # Retry up to 12 times, 45s apart (~9 min) when "operation in progress"
+          for attempt in $(seq 1 12); do
             if az containerapp update "${UPDATE_ARGS[@]}"; then
               echo "Deploy successful"
               exit 0
             fi
-            echo "Attempt $attempt/30: container app busy. Waiting 60s..."
-            sleep 60
+            echo "Attempt $attempt/12: container app busy. Waiting 45s..."
+            sleep 45
           done
-          echo "Deploy failed after 30 retries. If this persists, restart the Container App in Azure Portal and re-run."
+          echo "Deploy failed after 12 retries. If this persists, restart the Container App in Azure Portal and re-run."
           exit 1

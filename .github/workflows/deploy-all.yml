@@ -8,10 +8,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Avoid overlapping deploys when multiple pushes happen quickly
+# Cancel previous deploy when a new one is triggered so we don't have 3+ runs queued for 30+ min
 concurrency:
   group: deploy-all-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy-web:
