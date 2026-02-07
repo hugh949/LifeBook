@@ -57,11 +57,13 @@ jobs:
           mkdir -p .next/standalone/.next
           cp -r .next/static .next/standalone/.next/
           [ -d public ] && cp -r public .next/standalone/ || true
-          # Azure ZIP Deploy fails on symlinks in node_modules; copy with -L to resolve symlinks, then zip
-          cp -rL .next/standalone /tmp/standalone-deploy
-          cd /tmp/standalone-deploy && zip -r "$GITHUB_WORKSPACE/apps/web/.next/deploy.zip" .
-          echo "Deploy package size (Node runtime provided by Azure; zip has no symlinks):"
-          du -sh "$GITHUB_WORKSPACE/apps/web/.next/deploy.zip"
+          # Azure ZIP Deploy fails on symlinks in node_modules; use resolved copy and let the action zip it
+          DEPLOY_DIR="$GITHUB_WORKSPACE/apps/web/.next/standalone-deploy"
+          rm -rf "$DEPLOY_DIR"
+          mkdir -p "$DEPLOY_DIR"
+          cp -rL .next/standalone/. "$DEPLOY_DIR/"
+          echo "Deploy package size (Node runtime provided by Azure; no symlinks):"
+          du -sh "$DEPLOY_DIR"
 
       - name: Prepare Azure credentials
         id: azcreds
@@ -125,6 +127,17 @@ jobs:
           fi
           az webapp config set -g "$RG" -n "$APP" --startup-file "node server.js" --output none
 
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          resource-group-name: ${{ env.RESOURCE_GROUP }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: apps/web/.next/standalone-deploy
+
+      # After deploy: set API_UPSTREAM so /api and Talk reach the Container App.
+      # Do this after zip deploy to avoid SCM container restart killing the deployment
+      # ("Do not perform a management operation and a deployment operation in quick succession").
       - name: Set Web App API_UPSTREAM (so /api and Talk reach the Container App)
         run: |
           RG="${{ env.RESOURCE_GROUP }}"
@@ -138,11 +151,3 @@ jobs:
             az webapp config appsettings set -g "$RG" -n "$APP" --settings API_UPSTREAM="$API_UPSTREAM" --output none
             echo "Set API_UPSTREAM=$API_UPSTREAM"
           fi
-
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          resource-group-name: ${{ env.RESOURCE_GROUP }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: apps/web/.next/deploy.zip
