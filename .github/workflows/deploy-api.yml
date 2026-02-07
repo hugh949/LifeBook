@@ -143,13 +143,16 @@ jobs:
 
       - name: Build and push image
         run: |
+          set -e
           ACR="${{ env.ACR_NAME }}"
           REGISTRY="${ACR}.azurecr.io"
           IMAGE="${REGISTRY}/lifebook-api:${{ github.sha }}"
           IMAGE_LATEST="${REGISTRY}/lifebook-api:latest"
-          # Reuse previous image layers from ACR so we only push changed layers (base + pip deps already on Azure)
-          docker pull "$IMAGE_LATEST" || true
-          docker build --cache-from "$IMAGE_LATEST" -t "$IMAGE" ./services/api
+          CACHE_FROM=""
+          if docker pull "$IMAGE_LATEST" 2>/dev/null; then
+            CACHE_FROM="--cache-from $IMAGE_LATEST"
+          fi
+          docker build $CACHE_FROM -t "$IMAGE" ./services/api
           docker push "$IMAGE"
           docker tag "$IMAGE" "$IMAGE_LATEST"
           docker push "$IMAGE_LATEST"
@@ -212,12 +215,16 @@ jobs:
           [ ${#ENV_VARS[@]} -gt 0 ] && UPDATE_ARGS+=( --set-env-vars "${ENV_VARS[@]}" )
           # Retry up to 12 times, 45s apart (~9 min) when "operation in progress"
           for attempt in $(seq 1 12); do
-            if az containerapp update "${UPDATE_ARGS[@]}"; then
+            if az containerapp update "${UPDATE_ARGS[@]}" > /tmp/az-update.log 2>&1; then
               echo "Deploy successful"
               exit 0
             fi
-            echo "Attempt $attempt/12: container app busy. Waiting 45s..."
+            echo "Attempt $attempt/12: container app update failed or busy. Output:"
+            cat /tmp/az-update.log
+            echo "Waiting 45s..."
             sleep 45
           done
-          echo "Deploy failed after 12 retries. If this persists, restart the Container App in Azure Portal and re-run."
+          echo "Deploy failed after 12 retries. Last error:"
+          cat /tmp/az-update.log
+          echo "If this persists, restart the Container App in Azure Portal and re-run."
           exit 1

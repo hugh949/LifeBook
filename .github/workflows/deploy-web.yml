@@ -55,8 +55,11 @@ jobs:
           mkdir -p .next/standalone/.next
           cp -r .next/static .next/standalone/.next/
           [ -d public ] && cp -r public .next/standalone/ || true
-          echo "Deploy package size (Node runtime is provided by Azure; we only upload app + minimal deps):"
-          du -sh .next/standalone
+          # Azure ZIP Deploy fails on symlinks in node_modules; copy with -L to resolve symlinks, then zip
+          cp -rL .next/standalone /tmp/standalone-deploy
+          cd /tmp/standalone-deploy && zip -r "$GITHUB_WORKSPACE/apps/web/.next/deploy.zip" .
+          echo "Deploy package size (Node runtime provided by Azure; zip has no symlinks):"
+          du -sh "$GITHUB_WORKSPACE/apps/web/.next/deploy.zip"
 
       - name: Prepare Azure credentials
         id: azcreds
@@ -126,4 +129,4 @@ jobs:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           resource-group-name: ${{ env.RESOURCE_GROUP }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: apps/web/.next/standalone
+          package: apps/web/.next/deploy.zip
