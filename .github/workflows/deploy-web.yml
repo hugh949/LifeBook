@@ -7,6 +7,11 @@
 
 name: Deploy Web (Azure App Service)
 
+# Avoid 409 Conflict: only one deployment to the web app at a time (no parallel OneDeploy).
+concurrency:
+  group: deploy-web-${{ vars.AZURE_WEBAPP_NAME || 'app-lifebook-web-v1' }}
+  cancel-in-progress: false
+
 on:
   push:
     branches: [main]
@@ -105,6 +110,12 @@ jobs:
           else
             echo "Web App $APP already exists"
           fi
+
+      - name: Restart Web App (clear any stuck deployment lock)
+        run: |
+          az webapp restart -g "${{ env.RESOURCE_GROUP }}" -n "${{ env.AZURE_WEBAPP_NAME }}"
+          echo "Waiting 15s for app to release locks..."
+          sleep 15
 
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
