@@ -108,10 +108,21 @@ jobs:
             echo "Creating ACR $ACR"
             az acr create -g "$RG" -n "$ACR" --sku Basic -l "$LOC"
           fi
-          # Create Container Apps environment if missing
+          # Create Container Apps environment if missing (wait when "operation in progress")
           if ! az containerapp env show -g "$RG" -n "$CA_ENV" &>/dev/null; then
             echo "Creating Container Apps environment $CA_ENV"
-            az containerapp env create -g "$RG" -n "$CA_ENV" -l "$LOC"
+            if ! az containerapp env create -g "$RG" -n "$CA_ENV" -l "$LOC"; then
+              echo "Create returned error (may be 'operation in progress'). Waiting for environment to become ready (poll up to 10 min)..."
+              for i in $(seq 1 20); do
+                sleep 30
+                if az containerapp env show -g "$RG" -n "$CA_ENV" &>/dev/null; then
+                  echo "Environment is ready"
+                  break
+                fi
+                echo "  poll $i/20: not ready yet"
+              done
+            fi
+            az containerapp env show -g "$RG" -n "$CA_ENV" || (echo "Environment not ready after wait" && exit 1)
           fi
           # Create Container App if missing (placeholder image; update step will set real image)
           if ! az containerapp show -g "$RG" -n "$APP" &>/dev/null; then
