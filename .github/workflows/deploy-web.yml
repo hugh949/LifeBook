@@ -1,5 +1,6 @@
 # Deploy Next.js (LifeBook web) to Azure App Service.
-# Trigger: push to main (or manual). All Azure resources in West US 3 (westus3).
+# Trigger: only via Deploy All (workflow_call) or manual workflow_dispatch. No push trigger to avoid duplicate runs.
+# All Azure resources in West US 3 (westus3).
 #
 # Size: We deploy only the standalone build (app + minimal prod deps). Azure provides
 # the Node 20 runtime; we do not upload node binary or devDependencies.
@@ -16,11 +17,6 @@ concurrency:
   cancel-in-progress: false
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "apps/web/**"
-      - ".github/workflows/deploy-web.yml"
   workflow_dispatch:
   workflow_call:
 

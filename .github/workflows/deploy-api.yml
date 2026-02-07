@@ -1,4 +1,5 @@
 # Deploy FastAPI (LifeBook API) to Azure Container Apps.
+# Trigger: only via Deploy All (workflow_call) or manual workflow_dispatch. No push trigger to avoid duplicate runs.
 # Builds Docker image from services/api, pushes to ACR, updates Container App.
 # Uses --cache-from previous image in ACR so base + pip layers are reused; only changed layers are pushed.
 # All Azure resources must be in West US 3 (westus3).
@@ -23,11 +24,6 @@
 name: Deploy API (Azure Container Apps)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "services/api/**"
-      - ".github/workflows/deploy-api.yml"
   workflow_dispatch:
   workflow_call:
 
