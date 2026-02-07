@@ -71,8 +71,15 @@ In your repo: **Settings → Secrets and variables → Actions**.
   Then in Azure: **ACR** → **Access control (IAM)** → **Add role assignment** → **AcrPush** → assign to the app **LifeBook-GitHub** (the service principal you just created).  
   **If login fails with "client-id and tenant-id not supplied":** Use `--sdk-auth` so the JSON has `clientId`, `clientSecret`, `subscriptionId`, `tenantId`. Or use four secrets instead: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_CLIENT_SECRET`.
 
+**Secrets for Talk (voice companion):**
+
+- **`OPENAI_API_KEY`**  
+  Your OpenAI API key. If missing, the API returns a “stubbed” response and the app shows “Voice isn’t connected (no API key)”.
+- **`CORS_ALLOW_ORIGINS`**  
+  Your Web App URL, e.g. `https://app-lifebook-web-v1.azurewebsites.net`. The deploy workflow syncs this to the Container App so the API allows requests from the web app.
+
 **Variables (optional):**  
-If you used different names, add: `AZURE_WEBAPP_NAME`, `AZURE_RESOURCE_GROUP`, `AZURE_ACR_NAME`, `AZURE_CONTAINER_APP`. Defaults are in the table in `Azure_Deployment_Appendix.md` § 11.
+If you used different names, add: `AZURE_WEBAPP_NAME`, `AZURE_RESOURCE_GROUP`, `AZURE_ACR_NAME`, `AZURE_CONTAINER_APP`. Defaults are in the table in `Azure_Deployment_Appendix.md` § 11. The workflow uses `AZURE_CONTAINER_APP` to set the Web App’s `API_UPSTREAM` so **Talk** and `/api` reach the API.
 
 ---
 

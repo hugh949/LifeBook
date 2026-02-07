@@ -8,6 +8,7 @@
 # GitHub secrets: same as deploy-api (AZURE_CREDENTIALS or 4 separate) for login.
 #   Optionally AZURE_WEBAPP_PUBLISH_PROFILE for publish-profile deploy.
 # GitHub variables: AZURE_WEBAPP_NAME, AZURE_RESOURCE_GROUP (defaults below).
+#   AZURE_CONTAINER_APP (e.g. aca-lifebook-api-v1) is used to set API_UPSTREAM so /api and Talk reach the API.
 
 name: Deploy Web (Azure App Service)
 
@@ -25,6 +26,7 @@ env:
   RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'rg-lifebook-v1' }}
   APP_SERVICE_PLAN: ${{ vars.AZURE_APP_SERVICE_PLAN || 'asp-lifebook-v1' }}
   AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'westus3' }}
+  CONTAINER_APP: ${{ vars.AZURE_CONTAINER_APP || 'aca-lifebook-api-v1' }}
 
 jobs:
   build-and-deploy:
@@ -122,6 +124,20 @@ jobs:
             echo "Web App $APP already exists"
           fi
           az webapp config set -g "$RG" -n "$APP" --startup-file "node server.js" --output none
+
+      - name: Set Web App API_UPSTREAM (so /api and Talk reach the Container App)
+        run: |
+          RG="${{ env.RESOURCE_GROUP }}"
+          CA="${{ env.CONTAINER_APP }}"
+          APP="${{ env.AZURE_WEBAPP_NAME }}"
+          FQDN=$(az containerapp show -g "$RG" -n "$CA" --query "properties.configuration.ingress.fqdn" -o tsv 2>/dev/null || true)
+          if [ -z "$FQDN" ]; then
+            echo "::warning::Container App $CA not found or no FQDN. Set API_UPSTREAM manually in Azure Portal so Talk works."
+          else
+            API_UPSTREAM="https://$FQDN"
+            az webapp config appsettings set -g "$RG" -n "$APP" --settings API_UPSTREAM="$API_UPSTREAM" --output none
+            echo "Set API_UPSTREAM=$API_UPSTREAM"
+          fi
 
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
