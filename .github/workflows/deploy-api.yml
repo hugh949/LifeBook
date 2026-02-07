@@ -141,6 +141,9 @@ jobs:
           RG="${{ env.RESOURCE_GROUP }}"
           ACR="${{ env.ACR_NAME }}"
           APP="${{ env.CONTAINER_APP }}"
+          SERVER="${ACR}.azurecr.io"
+          # ACR must allow ARM tokens for managed identity pull
+          az acr config authentication-as-arm update -g "$RG" -r "$ACR" --status enabled 2>/dev/null || true
           # Enable system-assigned identity on the container app (idempotent)
           az containerapp identity assign -g "$RG" -n "$APP" --system-assigned 2>/dev/null || true
           sleep 5
@@ -149,6 +152,8 @@ jobs:
           ACR_ID="/subscriptions/$SUB_ID/resourceGroups/$RG/providers/Microsoft.ContainerRegistry/registries/$ACR"
           # Grant AcrPull so the app can pull our image (idempotent)
           az role assignment create --assignee "$PRINCIPAL_ID" --role AcrPull --scope "$ACR_ID" 2>/dev/null || true
+          # Register ACR with the container app and use system-assigned identity for pull
+          az containerapp registry set -g "$RG" -n "$APP" --server "$SERVER" --identity system
 
       - name: Login to ACR
         run: |
