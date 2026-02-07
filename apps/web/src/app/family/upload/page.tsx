@@ -39,8 +39,8 @@ export default function UploadPage() {
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDrag(true);
-  });
-  const onDragLeave = useCallback(() => setDrag(false));
+  }, []);
+  const onDragLeave = useCallback(() => setDrag(false), []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
