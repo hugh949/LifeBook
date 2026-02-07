@@ -1,12 +1,9 @@
 # Deploy Next.js (LifeBook web) to Azure App Service.
-# Trigger: push to main (or manual). Requires Azure Web App and publish profile.
-# All Azure resources must be in West US 3 (westus3).
+# Trigger: push to main (or manual). All Azure resources in West US 3 (westus3).
 #
-# GitHub secrets:
-#   AZURE_WEBAPP_PUBLISH_PROFILE - download from Azure Portal: Web App → Get publish profile
-#
-# GitHub variables (or set in workflow):
-#   AZURE_WEBAPP_NAME - name of the App Service (e.g. app-lifebook-web-v1)
+# GitHub secrets: same as deploy-api (AZURE_CREDENTIALS or 4 separate) for login.
+#   Optionally AZURE_WEBAPP_PUBLISH_PROFILE for publish-profile deploy.
+# GitHub variables: AZURE_WEBAPP_NAME, AZURE_RESOURCE_GROUP (defaults below).
 
 name: Deploy Web (Azure App Service)
 
@@ -21,6 +18,7 @@ on:
 
 env:
   AZURE_WEBAPP_NAME: ${{ vars.AZURE_WEBAPP_NAME || 'app-lifebook-web-v1' }}
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'rg-lifebook-v1' }}
 
 jobs:
   build-and-deploy:
@@ -45,10 +43,46 @@ jobs:
           npm ci
           npm run build
 
+      - name: Prepare Azure credentials
+        id: azcreds
+        run: |
+          set -e
+          DELIM="CREDS_$(openssl rand -hex 8)_END"
+          if [ -n "${AZURE_CREDENTIALS:-}" ]; then
+            node -e "
+              const raw = process.env.AZURE_CREDENTIALS;
+              const o = JSON.parse(raw);
+              const out = { clientId: o.clientId || o.appId || '', clientSecret: o.clientSecret || o.password || '', subscriptionId: o.subscriptionId || '', tenantId: o.tenantId || o.tenant || '' };
+              if (!out.clientId || !out.tenantId || !out.clientSecret) throw new Error('AZURE_CREDENTIALS must have clientId, tenantId, clientSecret.');
+              require('fs').writeFileSync('creds.json', JSON.stringify(out));
+            "
+          else
+            node -e "
+              const c = process.env.CID || '', s = process.env.SECRET || '', sub = process.env.SID || '', t = process.env.TID || '';
+              if (!c || !s || !t) throw new Error('Set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID (and AZURE_SUBSCRIPTION_ID). Or use AZURE_CREDENTIALS.');
+              require('fs').writeFileSync('creds.json', JSON.stringify({ clientId: c, clientSecret: s, subscriptionId: sub, tenantId: t }));
+            "
+          fi
+          echo "creds<<${DELIM}" >> $GITHUB_OUTPUT
+          cat creds.json >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "${DELIM}" >> $GITHUB_OUTPUT
+        env:
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+          CID: ${{ secrets.AZURE_CLIENT_ID }}
+          SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          SID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          TID: ${{ secrets.AZURE_TENANT_ID }}
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ steps.azcreds.outputs.creds }}
+
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          resource-group-name: ${{ env.RESOURCE_GROUP }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          # Deploy the built app (working-directory applies to run steps only; use explicit path)
           package: apps/web
