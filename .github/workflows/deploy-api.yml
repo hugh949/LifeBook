@@ -46,27 +46,37 @@ jobs:
       - name: Prepare Azure credentials
         id: azcreds
         run: |
-          if [ -n "$AZURE_CREDENTIALS" ]; then
-            echo 'creds<<CREDSEOF' >> $GITHUB_OUTPUT
+          set -e
+          DELIM="CREDS_$(openssl rand -hex 8)_END"
+          if [ -n "${AZURE_CREDENTIALS:-}" ]; then
             node -e "
               const raw = process.env.AZURE_CREDENTIALS;
-              let o = JSON.parse(raw);
+              const o = JSON.parse(raw);
               const out = {
-                clientId: o.clientId || o.appId,
-                clientSecret: o.clientSecret || o.password,
-                subscriptionId: o.subscriptionId,
-                tenantId: o.tenantId || o.tenant
+                clientId: o.clientId || o.appId || '',
+                clientSecret: o.clientSecret || o.password || '',
+                subscriptionId: o.subscriptionId || '',
+                tenantId: o.tenantId || o.tenant || ''
               };
-              if (!out.clientId || !out.tenantId || !out.clientSecret) throw new Error('JSON must have clientId (or appId), tenantId (or tenant), clientSecret (or password), and subscriptionId');
-              console.log(JSON.stringify(out));
-            " >> $GITHUB_OUTPUT
-            echo '' >> $GITHUB_OUTPUT
-            echo 'CREDSEOF' >> $GITHUB_OUTPUT
+              if (!out.clientId || !out.tenantId || !out.clientSecret) {
+                throw new Error('AZURE_CREDENTIALS must have clientId (or appId), tenantId (or tenant), clientSecret (or password). Add subscriptionId if missing.');
+              }
+              require('fs').writeFileSync('creds.json', JSON.stringify(out));
+            "
           else
-            echo 'creds<<CREDSEOF' >> $GITHUB_OUTPUT
-            node -e "console.log(JSON.stringify({clientId:process.env.CID,clientSecret:process.env.SECRET,subscriptionId:process.env.SID,tenantId:process.env.TID}))" >> $GITHUB_OUTPUT
-            echo 'CREDSEOF' >> $GITHUB_OUTPUT
+            node -e "
+              const c = process.env.CID || '';
+              const s = process.env.SECRET || '';
+              const sub = process.env.SID || '';
+              const t = process.env.TID || '';
+              if (!c || !s || !t) throw new Error('Set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID (and AZURE_SUBSCRIPTION_ID). Or use AZURE_CREDENTIALS JSON.');
+              require('fs').writeFileSync('creds.json', JSON.stringify({ clientId: c, clientSecret: s, subscriptionId: sub, tenantId: t }));
+            "
           fi
+          echo "creds<<${DELIM}" >> $GITHUB_OUTPUT
+          cat creds.json >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "${DELIM}" >> $GITHUB_OUTPUT
         env:
           AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
           CID: ${{ secrets.AZURE_CLIENT_ID }}
