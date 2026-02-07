@@ -7,6 +7,9 @@ from app.db.models import Base
 database_url = settings.database_url
 if database_url.startswith("postgresql://") and "+" not in database_url.split("?")[0]:
     database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+# Supabase and most cloud Postgres require SSL
+if "postgresql" in database_url and "sslmode" not in database_url:
+    database_url += "?sslmode=require" if "?" not in database_url else "&sslmode=require"
 
 connect_args = {} if "postgresql" in database_url else {"check_same_thread": False}
 engine = create_engine(

@@ -20,6 +20,8 @@ def get_url():
     url = os.environ.get("DATABASE_URL", "")
     if url.startswith("postgresql://") and "+" not in url.split("?")[0]:
         url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+    if url and "postgresql" in url and "sslmode" not in url:
+        url += "?sslmode=require" if "?" not in url else "&sslmode=require"
     return url
 
 def run_migrations_offline():
