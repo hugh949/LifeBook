@@ -27,6 +27,8 @@ Then open **http://localhost:3000**. The API is at http://localhost:8000 (health
 
 No Azure or OpenAI keys are required for this. Uploads use a local stub; Realtime voice returns a “stubbed” message until you set `OPENAI_API_KEY` in `.env`.
 
+**Local validation (Phase 1):** After starting, confirm (1) the app loads at http://localhost:3000, (2) Older → Talk works (or shows the stubbed message), and (3) http://localhost:3000/api/proxy-ping returns 200 and JSON with `"proxy": true`. Then your local environment is working.
+
 ---
 
 ## Iterate quickly (dev with hot reload)
@@ -104,7 +106,7 @@ cd services/api && pip install . && alembic upgrade head && uvicorn app.main:app
 cd apps/web && npm install && npm run dev
 ```
 
-Then open http://localhost:3000. The app uses `/api`, which Next rewrites to `http://localhost:8000` by default.
+Then open http://localhost:3000. The app uses `/api`, which the runtime proxy forwards to `API_UPSTREAM` (default `http://localhost:8000`).
 
 ---
 

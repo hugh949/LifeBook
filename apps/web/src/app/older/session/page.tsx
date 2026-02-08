@@ -65,7 +65,7 @@ export default function SessionPage() {
       };
 
       setStatus("connected");
-      setMessage("You’re live. Speak naturally — one question at a time.");
+      setMessage("You’re live. Speak naturally — one question at a time. (Voice pipeline OK.)");
     } catch (err) {
       setStatus("error");
       setMessage(err instanceof Error ? err.message : "Connection failed");
