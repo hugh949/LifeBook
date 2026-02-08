@@ -85,6 +85,113 @@ Requires that you have permission to create role assignments (e.g. Owner or User
 
 ---
 
+## azure-acr-containerapp-pull.sh
+
+Let the **Container App** (API) pull images from ACR using its **system-assigned Managed Identity**. Use this when the Portal doesn’t show AcrPull or you prefer CLI.
+
+**Usage:**
+```bash
+az login
+./scripts/azure-acr-containerapp-pull.sh
+```
+
+**What it does:**
+1. Enables system-assigned identity on the Container App (if not already).
+2. Assigns the **AcrPull** role on your ACR to that identity (by role name, or by built-in role ID if name isn’t available).
+3. Registers the ACR with the Container App so it uses this identity for image pull.
+
+**Overrides (optional):**
+```bash
+AZURE_RESOURCE_GROUP=my-rg AZURE_ACR_NAME=myacr AZURE_CONTAINER_APP=my-app ./scripts/azure-acr-containerapp-pull.sh
+```
+
+Requires: `az` CLI, logged in with an account that can modify the Container App and create role assignments on the ACR (e.g. Owner or User Access Administrator).
+
+---
+
+## azure-create-postgres.sh
+
+Create Azure PostgreSQL Flexible Server (Burstable B1ms) via CLI – target **under ~$30/month**.
+
+**Usage:**
+```bash
+# Set password (required: 8+ chars, upper, lower, number, special)
+PG_ADMIN_PASSWORD='YourSecurePassword123!' ./scripts/azure-create-postgres.sh
+```
+
+Or you'll be prompted for the password. The script creates:
+
+- **Tier:** Burstable (Standard_B1ms)
+- **Storage:** 32 GB (minimum)
+- **Backup:** 7 days
+- **Region:** West US 3
+- **Public access:** 0.0.0.0 (allows Azure services; restrict later if needed)
+
+**Output:** Prints `DATABASE_URL` to add to GitHub Secrets.
+
+**Overrides:** `AZURE_RESOURCE_GROUP`, `AZURE_LOCATION`, `PG_SERVER_NAME`, `PG_ADMIN_USER`, `PG_DATABASE`.
+
+---
+
+## azure-postgres-change-password.sh
+
+Change the Azure PostgreSQL admin password. Prompts for new password (supports `@` and other special characters). Outputs the new `DATABASE_URL` with the password URL-encoded for GitHub Secrets.
+
+**Usage:**
+```bash
+./scripts/azure-postgres-change-password.sh
+```
+
+When prompted, type the new password (nothing will appear as you type). The script updates Azure and prints the `DATABASE_URL` to paste into GitHub Secrets.
+
+**Overrides:** `AZURE_RESOURCE_GROUP`, `PG_SERVER_NAME`, `PG_ADMIN_USER`, `PG_DATABASE`.
+
+---
+
+## azure-api-status.sh
+
+Manage and inspect the LifeBook API Container App via Azure CLI (no Portal needed).
+
+**Usage:**
+```bash
+./scripts/azure-api-status.sh <command> [args]
+```
+
+**Commands:**
+
+| Command | Description |
+|---------|-------------|
+| `list` | List revisions with status (Active, Failed, etc.) |
+| `traffic` | Show traffic split |
+| `traffic REVISION=100` | Send 100% traffic to a revision (e.g. working one) |
+| `logs` | Show last 50 log lines |
+| `logs --follow` | Stream logs in real time |
+| `logs REVISION` | Logs from a specific revision |
+| `health` | Curl `/health` on the API |
+| `url` | Print the API base URL |
+
+**Examples:**
+```bash
+# List revisions, find the working one
+./scripts/azure-api-status.sh list
+
+# Route all traffic to the working revision (e.g. rx9fam5)
+./scripts/azure-api-status.sh traffic aca-lifebook-api-v1--rx9fam5=100
+
+# Stream logs
+./scripts/azure-api-status.sh logs --follow
+
+# Check if API responds
+./scripts/azure-api-status.sh health
+./scripts/azure-api-status.sh url
+```
+
+**Requirements:** `az` CLI, logged in (`az login`).
+
+**Overrides:** `AZURE_RESOURCE_GROUP`, `AZURE_CONTAINER_APP` (defaults: `rg-lifebook-v1`, `aca-lifebook-api-v1`).
+
+---
+
 ## run-local.sh
 
 Runs the app locally (e.g. Docker Compose). See repo root **README.md**.

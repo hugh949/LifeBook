@@ -82,6 +82,7 @@ def list_moments(
     to: str | None = None,
     db: Session = Depends(get_db),
 ):
+    logger.info("moments list: personId=%s q=%s", personId, (q[:50] + "..." if q and len(q) > 50 else q))
     try:
         query = db.query(models.Moment).filter(models.Moment.family_id == DEFAULT_FAMILY_ID)
         if q:
@@ -111,9 +112,10 @@ def list_moments(
             raw_thumb, raw_img = photo_map.get(str(m.id), (None, None))
             thumb_url, image_url = _sign_display_urls(raw_thumb, raw_img)
             out.append(_moment_to_response(m, thumb_url=thumb_url, image_url=image_url))
+        logger.info("moments list: returned %d moments", len(out))
         return out
     except Exception as e:
-        logger.exception("list_moments error")
+        logger.exception("moments list: error %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -166,6 +168,7 @@ def _load_moment_transcripts(db: Session, moment_id: str) -> list[dict]:
 
 @router.get("/{moment_id}")
 def get_moment(moment_id: str, db: Session = Depends(get_db)):
+    logger.info("moments get: moment_id=%s", moment_id)
     try:
         moment = (
             db.query(models.Moment)
@@ -184,7 +187,7 @@ def get_moment(moment_id: str, db: Session = Depends(get_db)):
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("get_moment error")
+        logger.exception("moments get: error %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

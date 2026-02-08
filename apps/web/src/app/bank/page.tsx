@@ -56,9 +56,12 @@ export default function BankPage() {
         <p style={{ color: "var(--ink-muted)" }}>Loading…</p>
       )}
       {error && (
-        <p role="alert" className="card" style={{ background: "var(--error-bg)", color: "var(--error)" }}>
-          {error}
-        </p>
+        <div role="alert" className="card" style={{ background: "var(--error-bg)", color: "var(--error)" }}>
+          <p style={{ margin: 0 }}>{error}</p>
+          <p style={{ margin: "8px 0 0", fontSize: 12, opacity: 0.9 }}>
+            Check browser console (F12) for full API response details.
+          </p>
+        </div>
       )}
       {!loading && !error && moments.length === 0 && (
         <div className="card empty-state">

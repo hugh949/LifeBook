@@ -131,7 +131,12 @@ export default function SessionPage() {
               color: status === "error" ? "var(--error)" : "var(--ink-muted)",
             }}
           >
-            {message}
+            <p style={{ margin: 0 }}>{message}</p>
+            {status === "error" && (
+              <p style={{ margin: "8px 0 0", fontSize: 12, opacity: 0.9 }}>
+                Check browser console (F12) for full API response details.
+              </p>
+            )}
           </div>
         )}
 
