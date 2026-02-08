@@ -52,9 +52,24 @@ async def log_requests(request: Request, call_next):
         raise
 
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_allow_origins.split(","),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.include_router(health.router)
+app.include_router(media.router)
+app.include_router(realtime.router)
+app.include_router(sessions.router)
+app.include_router(moments.router)
+
+
+# Register after routers so we override Starlette's default 500 "Internal Server Error"
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Catch unhandled exceptions, log full traceback, return 500."""
+    """Catch unhandled exceptions (including dependency errors), log, return 500 with real error in JSON."""
     logger.exception(
         "Unhandled exception %s %s: %s\n%s",
         request.method,
@@ -70,17 +85,3 @@ async def global_exception_handler(request: Request, exc: Exception):
             "_traceback": traceback.format_exc() if settings.app_env != "production" else None,
         },
     )
-
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_allow_origins.split(","),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-app.include_router(health.router)
-app.include_router(media.router)
-app.include_router(realtime.router)
-app.include_router(sessions.router)
-app.include_router(moments.router)

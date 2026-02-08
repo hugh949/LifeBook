@@ -196,6 +196,15 @@ jobs:
           AZURE_STORAGE_CONTAINER_AUDIO: ${{ secrets.AZURE_STORAGE_CONTAINER_AUDIO }}
         run: |
           set -e
+          # Confirm which secrets are set (values never printed)
+          echo "Secrets present (will be sent to Container App):"
+          [ -n "$DATABASE_URL" ] && echo "  DATABASE_URL: set" || echo "  DATABASE_URL: (empty)"
+          [ -n "$AZURE_STORAGE_ACCOUNT" ] && echo "  AZURE_STORAGE_ACCOUNT: set" || echo "  AZURE_STORAGE_ACCOUNT: (empty)"
+          [ -n "$AZURE_STORAGE_ACCOUNT_KEY" ] && echo "  AZURE_STORAGE_ACCOUNT_KEY: set" || echo "  AZURE_STORAGE_ACCOUNT_KEY: (empty)"
+          [ -n "$OPENAI_API_KEY" ] && echo "  OPENAI_API_KEY: set" || echo "  OPENAI_API_KEY: (empty)"
+          [ -n "$CORS_ALLOW_ORIGINS" ] && echo "  CORS_ALLOW_ORIGINS: set" || echo "  CORS_ALLOW_ORIGINS: (empty)"
+          [ -n "$AZURE_STORAGE_CONTAINER_PHOTOS" ] && echo "  AZURE_STORAGE_CONTAINER_PHOTOS: set" || echo "  AZURE_STORAGE_CONTAINER_PHOTOS: (empty, will use default photos)"
+          [ -n "$AZURE_STORAGE_CONTAINER_AUDIO" ] && echo "  AZURE_STORAGE_CONTAINER_AUDIO: set" || echo "  AZURE_STORAGE_CONTAINER_AUDIO: (empty, will use default audio)"
           # Brief wait so any just-finished operation can clear (was 2 min; 30s is enough when app is idle)
           echo "Waiting 30s before container app update..."
           sleep 30

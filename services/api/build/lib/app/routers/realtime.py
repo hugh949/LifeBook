@@ -26,20 +26,8 @@ class TokenResponse(BaseModel):
 
 @router.post("/token", response_model=TokenResponse)
 def mint_token():
-    try:
-        return _mint_token_impl()
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("realtime/token: unhandled error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-def _mint_token_impl() -> TokenResponse:
-    logger.info("realtime/token: request received")
     api_key = (settings.openai_api_key or "").strip()
     if not api_key:
-        logger.info("realtime/token: no OPENAI_API_KEY, returning stubbed")
         return TokenResponse(
             model=settings.openai_realtime_model or "gpt-realtime",
             stubbed=True,
@@ -59,7 +47,6 @@ def _mint_token_impl() -> TokenResponse:
     }
 
     try:
-        logger.info("realtime/token: calling OpenAI client_secrets (model=%s)", model)
         with httpx.Client() as client:
             r = client.post(
                 "https://api.openai.com/v1/realtime/client_secrets",
@@ -78,18 +65,13 @@ def _mint_token_impl() -> TokenResponse:
             raise HTTPException(status_code=502, detail="OpenAI returned invalid JSON")
     except httpx.HTTPStatusError as e:
         msg = e.response.text or "OpenAI API error"
-        logger.error(
-            "realtime/token: OpenAI HTTP %s, body=%s",
-            e.response.status_code,
-            msg[:500],
-            exc_info=True,
-        )
+        logger.warning("OpenAI client_secrets error: %s %s", e.response.status_code, msg[:200])
         raise HTTPException(
             status_code=e.response.status_code,
             detail=msg if len(msg) < 500 else msg[:500] + "...",
         )
     except Exception as e:
-        logger.exception("realtime/token: unexpected error: %s", e)
+        logger.exception("Realtime token error")
         raise HTTPException(status_code=502, detail=str(e))
 
     if not isinstance(data, dict):
@@ -113,7 +95,6 @@ def _mint_token_impl() -> TokenResponse:
         except (ValueError, TypeError):
             pass
 
-    logger.info("realtime/token: success, model=%s", resp_model)
     return TokenResponse(
         value=value,
         client_secret=value,
@@ -131,7 +112,6 @@ class RealtimeCallsBody(BaseModel):
 @router.post("/calls")
 def realtime_calls(body: RealtimeCallsBody):
     """Proxy SDP offer to OpenAI Realtime; returns SDP answer. Avoids CORS for browser WebRTC."""
-    logger.info("realtime/calls: SDP offer received, len=%d", len(body.sdp or ""))
     try:
         with httpx.Client() as client:
             r = client.post(
@@ -144,19 +124,11 @@ def realtime_calls(body: RealtimeCallsBody):
                 timeout=15.0,
             )
         r.raise_for_status()
-        logger.info("realtime/calls: success, SDP answer len=%d", len(r.text or ""))
         return {"sdp": r.text}
     except httpx.HTTPStatusError as e:
-        logger.error(
-            "realtime/calls: OpenAI HTTP %s, body=%s",
-            e.response.status_code,
-            (e.response.text or "")[:500],
-            exc_info=True,
-        )
         raise HTTPException(
             status_code=e.response.status_code,
             detail=e.response.text or "OpenAI Realtime error",
         )
     except Exception as e:
-        logger.exception("realtime/calls: unexpected error: %s", e)
         raise HTTPException(status_code=502, detail=str(e))

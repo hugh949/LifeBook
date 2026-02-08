@@ -15,11 +15,21 @@ router = APIRouter(prefix="/media", tags=["media"])
 
 @router.post("/sas", response_model=SasResponse)
 def create_sas(body: SasRequest):
+    try:
+        return _create_sas_impl(body)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("media/sas: unhandled error: %s", e)
+        raise HTTPException(status_code=500, detail=f"media/sas: {str(e)}")
+
+
+def _create_sas_impl(body: SasRequest) -> SasResponse:
     logger.info("media/sas: type=%s fileName=%s", body.type, body.fileName)
     blob_path = f"{body.type}s/{uuid4()}_{body.fileName}"
-    try:
-        if settings.azure_storage_account and settings.azure_storage_account_key:
-            container = settings.photos_container if body.type == "photo" else settings.audio_container
+    if settings.azure_storage_account and settings.azure_storage_account_key:
+        container = settings.photos_container if body.type == "photo" else settings.audio_container
+        try:
             blob_url, upload_url = generate_upload_sas(
                 account_name=settings.azure_storage_account,
                 account_key=settings.azure_storage_account_key,
@@ -27,16 +37,17 @@ def create_sas(body: SasRequest):
                 blob_name=blob_path,
                 expiry_minutes=settings.sas_ttl_minutes,
             )
-            logger.info("media/sas: generated SAS for container=%s", container)
-        else:
-            blob_url = f"https://local-mvp/lifebook/{blob_path}"
-            upload_url = blob_url
-            logger.info("media/sas: no Azure storage, returning stub URL")
+        except Exception as e:
+            logger.exception("media/sas: Azure SAS failed: %s", e, exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Storage SAS failed: {str(e)}")
+        logger.info("media/sas: generated SAS for container=%s", container)
         expires = (datetime.now(timezone.utc) + timedelta(minutes=settings.sas_ttl_minutes)).isoformat().replace("+00:00", "Z")
         return SasResponse(uploadUrl=upload_url, blobUrl=blob_url, expiresAt=expires)
-    except Exception as e:
-        logger.exception("media/sas: error %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    blob_url = f"https://local-mvp/lifebook/{blob_path}"
+    upload_url = blob_url
+    logger.info("media/sas: no Azure storage, returning stub URL")
+    expires = (datetime.now(timezone.utc) + timedelta(minutes=settings.sas_ttl_minutes)).isoformat().replace("+00:00", "Z")
+    return SasResponse(uploadUrl=upload_url, blobUrl=blob_url, expiresAt=expires)
 
 
 @router.post("/complete", response_model=CompleteResponse)
