@@ -29,7 +29,15 @@ def setup_logging(level: str | None = None) -> None:
     if not root.handlers:
         h = logging.StreamHandler(sys.stderr)
         h.setFormatter(UTCTimeFormatter(LOG_FORMAT, datefmt=DATE_FMT))
+        # Flush after each record so logs show immediately in Azure Log Stream
+        h.terminator = "\n"
         root.addHandler(h)
+        # Ensure stderr is flushed (Python may buffer when not a TTY)
+        if hasattr(sys.stderr, "reconfigure"):
+            try:
+                sys.stderr.reconfigure(line_buffering=True)
+            except Exception:
+                pass
     # Reduce noisy lib logs
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)

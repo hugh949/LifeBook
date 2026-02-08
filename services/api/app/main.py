@@ -17,6 +17,7 @@ app = FastAPI(title="LifeBook API", version="0.1.0")
 @app.on_event("startup")
 def startup_log_config():
     """Log config status at startup (no secrets). Helps troubleshoot env var issues."""
+    logger.info("LifeBook API starting up (if you see this in Log Stream, logging is working)")
     cfg = {
         "APP_ENV": settings.app_env,
         "DATABASE_URL_set": bool(settings.database_url),

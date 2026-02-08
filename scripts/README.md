@@ -164,11 +164,11 @@ Manage and inspect the LifeBook API Container App via Azure CLI (no Portal neede
 | `list` | List revisions with status (Active, Failed, etc.) |
 | `traffic` | Show traffic split |
 | `traffic REVISION=100` | Send 100% traffic to a revision (e.g. working one) |
-| `logs` | Show last 50 log lines |
-| `logs --follow` | Stream logs in real time |
-| `logs REVISION` | Logs from a specific revision |
-| `health` | Curl `/health` on the API |
+| `logs [N] [--follow] [--system]` | Last N console log lines (default 100); `--follow` streams; `--system` for system logs |
+| `health` | Curl `GET /health` on the API |
+| `moments` | Curl `GET /moments` — use to reproduce 500 and see API error body in CLI |
 | `url` | Print the API base URL |
+| `summary` | One-shot: revisions + traffic + health + last 30 log lines |
 
 **Examples:**
 ```bash
@@ -178,8 +178,14 @@ Manage and inspect the LifeBook API Container App via Azure CLI (no Portal neede
 # Route all traffic to the working revision (e.g. rx9fam5)
 ./scripts/azure-api-status.sh traffic aca-lifebook-api-v1--rx9fam5=100
 
-# Stream logs
-./scripts/azure-api-status.sh logs --follow
+# One-shot: status + recent logs (good first check)
+./scripts/azure-api-status.sh summary
+
+# Stream logs (like Portal Log Stream)
+./scripts/azure-api-status.sh logs 200 --follow
+
+# Reproduce /moments 500 and see error body
+./scripts/azure-api-status.sh moments
 
 # Check if API responds
 ./scripts/azure-api-status.sh health
