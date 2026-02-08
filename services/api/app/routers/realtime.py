@@ -1,6 +1,7 @@
 import logging
 import httpx
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from app.core.config import settings
 from pydantic import BaseModel
 
@@ -32,7 +33,11 @@ def mint_token():
         raise
     except Exception as e:
         logger.exception("realtime/token: unhandled error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        # Always return JSON so clients get parseable detail (avoid plain "Internal Server Error")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": str(e), "type": type(e).__name__},
+        )
 
 
 def _mint_token_impl() -> TokenResponse:

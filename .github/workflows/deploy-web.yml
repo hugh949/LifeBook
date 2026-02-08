@@ -65,6 +65,33 @@ jobs:
           echo "Deploy package size (Node runtime provided by Azure; no symlinks):"
           du -sh "$DEPLOY_DIR"
 
+      - name: Verify API proxy is in build (serve /api/proxy-ping)
+        run: |
+          DEPLOY_DIR="$GITHUB_WORKSPACE/apps/web/.next/standalone-deploy"
+          PORT=37982
+          cd "$DEPLOY_DIR"
+          PORT=$PORT node server.js &
+          PID=$!
+          echo "Started server PID=$PID on port $PORT"
+          sleep 5
+          set +e
+          RESP=$(curl -s -w "\n%{http_code}" "http://127.0.0.1:$PORT/api/proxy-ping")
+          CODE=$(echo "$RESP" | tail -n1)
+          BODY=$(echo "$RESP" | sed '$d')
+          kill $PID 2>/dev/null || true
+          wait $PID 2>/dev/null || true
+          set -e
+          echo "Response: $BODY (HTTP $CODE)"
+          if [ "$CODE" != "200" ]; then
+            echo "::error::/api/proxy-ping returned HTTP $CODE (expected 200). Build may not include runtime proxy."
+            exit 1
+          fi
+          if ! echo "$BODY" | grep -q '"proxy":true'; then
+            echo "::error::/api/proxy-ping response missing \"proxy\":true. Body: $BODY"
+            exit 1
+          fi
+          echo "API proxy verified in build."
+
       - name: Prepare Azure credentials
         id: azcreds
         run: |
@@ -151,3 +178,9 @@ jobs:
             az webapp config appsettings set -g "$RG" -n "$APP" --settings API_UPSTREAM="$API_UPSTREAM" --output none
             echo "Set API_UPSTREAM=$API_UPSTREAM"
           fi
+
+      - name: Restart Web App (pick up new deployment and API_UPSTREAM)
+        run: |
+          sleep 5
+          az webapp restart -g "${{ env.RESOURCE_GROUP }}" -n "${{ env.AZURE_WEBAPP_NAME }}" --output none
+          echo "Web App restarted; wait ~30s then try the site."

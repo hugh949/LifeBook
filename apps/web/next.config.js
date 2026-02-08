@@ -2,9 +2,8 @@
 const nextConfig = {
   output: "standalone",
   reactStrictMode: true,
-  async rewrites() {
-    const upstream = process.env.API_UPSTREAM || "http://localhost:8000";
-    return [{ source: "/api/:path*", destination: `${upstream}/:path*` }];
-  },
+  // API proxy: do NOT use rewrites here. Rewrites are applied at BUILD time, so on
+  // Azure the built app had destination localhost:8000 and /api/* always 500'd.
+  // We use a runtime proxy in src/app/api/[...path]/route.ts (reads API_UPSTREAM per request).
 };
 module.exports = nextConfig;
