@@ -2,6 +2,13 @@
 
 Short guide for the validation cycle (local → small change → deploy → verify prod) and how to roll back or abandon.
 
+## Release control (manual deploy only)
+
+Production does **not** deploy on push to `main`. To deploy:
+
+1. **GitHub** → repo → **Actions** → **Deploy All (Web + API)** → **Run workflow** → **Run workflow** (branch: `main`).
+2. Wait for the run to finish, then verify (see below).
+
 ## Phase 3: Verify production after deploy
 
 After merging to `main` and running the **Deploy All** workflow (or deploy-api + deploy-web):

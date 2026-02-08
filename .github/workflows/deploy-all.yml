@@ -1,11 +1,10 @@
-# Deploy both Web and API to Azure. Runs on push to main (any path) or manual dispatch.
+# Deploy both Web and API to Azure. Manual only (no deploy on push).
+# Run via: Actions → Deploy All (Web + API) → Run workflow.
 # Uses the same secrets/variables as deploy-web.yml and deploy-api.yml.
 
 name: Deploy All (Web + API)
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 # Cancel previous deploy when a new one is triggered so we don't have 3+ runs queued for 30+ min
