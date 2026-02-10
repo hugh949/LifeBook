@@ -178,6 +178,7 @@ export default function SessionPage() {
   const [changeNewCodeConfirm, setChangeNewCodeConfirm] = useState("");
   const [editingStoryId, setEditingStoryId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [passphraseSetupNewParticipantId, setPassphraseSetupNewParticipantId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const storyPlaybackRef = useRef<HTMLAudioElement | null>(null); // Build 7: play shared story
   const pcRef = useRef<RTCPeerConnection | null>(null);
