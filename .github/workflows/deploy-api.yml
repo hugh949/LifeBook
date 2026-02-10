@@ -50,8 +50,10 @@ jobs:
         id: azcreds
         run: |
           set -e
+          echo "==> Preparing Azure credentials (AZURE_CREDENTIALS or AZURE_CLIENT_ID/SECRET/TENANT_ID)..."
           DELIM="CREDS_$(openssl rand -hex 8)_END"
           if [ -n "${AZURE_CREDENTIALS:-}" ]; then
+            echo "==> Using AZURE_CREDENTIALS JSON..."
             node -e "
               const raw = process.env.AZURE_CREDENTIALS;
               const o = JSON.parse(raw);
@@ -67,6 +69,7 @@ jobs:
               require('fs').writeFileSync('creds.json', JSON.stringify(out));
             "
           else
+            echo "==> Using AZURE_CLIENT_ID / AZURE_CLIENT_SECRET / AZURE_TENANT_ID..."
             node -e "
               const c = process.env.CID || '';
               const s = process.env.SECRET || '';
@@ -80,6 +83,7 @@ jobs:
           cat creds.json >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
           echo "${DELIM}" >> $GITHUB_OUTPUT
+          echo "==> Azure credentials prepared successfully."
         env:
           AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
           CID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -95,24 +99,25 @@ jobs:
       - name: Ensure API infrastructure exists
         run: |
           set -e
+          echo "==> Ensuring API infrastructure (RG, ACR, Container Apps env, Container App)..."
           RG="${{ env.RESOURCE_GROUP }}"
           ACR="${{ env.ACR_NAME }}"
           CA_ENV="${{ env.CA_ENV }}"
           APP="${{ env.CONTAINER_APP }}"
           LOC="${{ env.AZURE_LOCATION }}"
-          # Create resource group if missing
+          echo "==> Checking resource group $RG..."
           if ! az group show -n "$RG" &>/dev/null; then
-            echo "Creating resource group $RG in $LOC"
+            echo "==> Creating resource group $RG in $LOC"
             az group create -n "$RG" -l "$LOC"
           fi
-          # Create ACR if missing (name must be globally unique)
+          echo "==> Checking ACR $ACR..."
           if ! az acr show -n "$ACR" &>/dev/null; then
-            echo "Creating ACR $ACR"
+            echo "==> Creating ACR $ACR"
             az acr create -g "$RG" -n "$ACR" --sku Basic -l "$LOC"
           fi
-          # Create Container Apps environment if missing (wait when "operation in progress")
+          echo "==> Checking Container Apps environment $CA_ENV..."
           if ! az containerapp env show -g "$RG" -n "$CA_ENV" &>/dev/null; then
-            echo "Creating Container Apps environment $CA_ENV"
+            echo "==> Creating Container Apps environment $CA_ENV"
             if ! az containerapp env create -g "$RG" -n "$CA_ENV" -l "$LOC"; then
               echo "Create returned error (may be 'operation in progress'). Waiting for environment to become ready (poll up to 10 min)..."
               for i in $(seq 1 20); do
@@ -124,66 +129,84 @@ jobs:
                 echo "  poll $i/20: not ready yet"
               done
             fi
-            az containerapp env show -g "$RG" -n "$CA_ENV" || (echo "Environment not ready after wait" && exit 1)
+            az containerapp env show -g "$RG" -n "$CA_ENV" || (echo "==> ERROR: Environment not ready after wait" && exit 1)
           fi
-          # Create Container App if missing (placeholder image; update step will set real image)
+          echo "==> Checking Container App $APP..."
           if ! az containerapp show -g "$RG" -n "$APP" &>/dev/null; then
-            echo "Creating Container App $APP"
+            echo "==> Creating Container App $APP"
             az containerapp create -g "$RG" -n "$APP" --environment "$CA_ENV" \
               --image mcr.microsoft.com/azuredocs/containerapps-helloworld:latest \
               --ingress external --target-port 80
             echo "Add DATABASE_URL, AZURE_STORAGE_*, OPENAI_API_KEY, CORS_ALLOW_ORIGINS in Azure Portal → Container App → Configuration"
           else
-            echo "Container App $APP already exists"
+            echo "==> Container App $APP already exists."
           fi
+          echo "==> API infrastructure check complete."
 
       - name: Login to ACR
         run: |
+          echo "==> Logging in to ACR ${{ env.ACR_NAME }}..."
           az acr login --name ${{ env.ACR_NAME }}
-        # Service principal in AZURE_CREDENTIALS must have AcrPush on the ACR (or Contributor on the ACR resource)
+          echo "==> ACR login successful."
 
-      - name: Build and push image
+      - name: Build Docker image
+        id: build
         run: |
           set -e
+          echo "==> Building API Docker image (services/api)..."
           ACR="${{ env.ACR_NAME }}"
           REGISTRY="${ACR}.azurecr.io"
           IMAGE="${REGISTRY}/lifebook-api:${{ github.sha }}"
           IMAGE_LATEST="${REGISTRY}/lifebook-api:latest"
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           CACHE_FROM=""
           if docker pull "$IMAGE_LATEST" 2>/dev/null; then
+            echo "==> Using cache from $IMAGE_LATEST"
             CACHE_FROM="--cache-from $IMAGE_LATEST"
+          else
+            echo "==> No previous image for cache; building from scratch."
           fi
           docker build $CACHE_FROM -t "$IMAGE" ./services/api
+          echo "==> Docker build finished. Image: $IMAGE"
+
+      - name: Push image to ACR
+        run: |
+          set -e
+          IMAGE="${{ env.IMAGE }}"
+          IMAGE_LATEST="${IMAGE%:*}:latest"
+          echo "==> Pushing $IMAGE to ACR..."
           docker push "$IMAGE"
+          echo "==> Pushing $IMAGE_LATEST..."
           docker tag "$IMAGE" "$IMAGE_LATEST"
           docker push "$IMAGE_LATEST"
-          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+          echo "==> Push complete."
+        # Service principal must have AcrPush on the ACR (or Contributor on the ACR resource)
 
       - name: Ensure Container App can pull from ACR
         run: |
           set -e
+          echo "==> Ensuring Container App can pull from ACR..."
           RG="${{ env.RESOURCE_GROUP }}"
           ACR="${{ env.ACR_NAME }}"
           APP="${{ env.CONTAINER_APP }}"
           SERVER="${ACR}.azurecr.io"
-          # Skip if this registry is already configured (avoids "operation in progress" when not needed)
           EXISTING=$(az containerapp show -g "$RG" -n "$APP" --query "properties.configuration.registries[?server=='$SERVER'].server" -o tsv 2>/dev/null || true)
           if [ "$EXISTING" = "$SERVER" ]; then
-            echo "Registry $SERVER already configured, skipping"
+            echo "==> Registry $SERVER already configured, skipping."
             exit 0
           fi
-          # Enable ACR admin and set registry (after build so any prior operation may have finished)
+          echo "==> Enabling ACR admin and setting registry for $APP..."
           az acr update -g "$RG" -n "$ACR" --admin-enabled true --output none
           ACR_PASS=$(az acr credential show -g "$RG" -n "$ACR" --query "passwords[0].value" -o tsv)
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
             if az containerapp registry set -g "$RG" -n "$APP" --server "$SERVER" --username "$ACR" --password "$ACR_PASS"; then
-              echo "Registry set successfully"
+              echo "==> Registry set successfully."
               exit 0
             fi
-            echo "Attempt $attempt: container app busy. Waiting 45s..."
+            echo "==> Attempt $attempt/10: container app busy. Waiting 45s..."
             sleep 45
           done
-          echo "Registry set failed after 10 retries"
+          echo "==> ERROR: Registry set failed after 10 retries."
           exit 1
 
       - name: Deploy to Container Apps
@@ -202,8 +225,8 @@ jobs:
           AZURE_SPEECH_ENDPOINT: ${{ secrets.AZURE_SPEECH_ENDPOINT }}
         run: |
           set -e
-          # Confirm which secrets are set (values never printed)
-          echo "Secrets present (will be sent to Container App):"
+          echo "==> Deploying to Container App ${{ env.CONTAINER_APP }} (image: ${{ env.IMAGE }})..."
+          echo "==> Secrets present (will be sent to Container App):"
           [ -n "$DATABASE_URL" ] && echo "  DATABASE_URL: set" || echo "  DATABASE_URL: (empty)"
           [ -n "$AZURE_STORAGE_ACCOUNT" ] && echo "  AZURE_STORAGE_ACCOUNT: set" || echo "  AZURE_STORAGE_ACCOUNT: (empty)"
           [ -n "$AZURE_STORAGE_ACCOUNT_KEY" ] && echo "  AZURE_STORAGE_ACCOUNT_KEY: set" || echo "  AZURE_STORAGE_ACCOUNT_KEY: (empty)"
@@ -238,18 +261,18 @@ jobs:
           az containerapp ingress update -g ${{ env.RESOURCE_GROUP }} -n ${{ env.CONTAINER_APP }} --target-port 80 --output none
           UPDATE_ARGS=( --name ${{ env.CONTAINER_APP }} --resource-group ${{ env.RESOURCE_GROUP }} --image ${{ env.IMAGE }} )
           [ ${#ENV_VARS[@]} -gt 0 ] && UPDATE_ARGS+=( --set-env-vars "${ENV_VARS[@]}" )
-          # Retry up to 12 times, 45s apart (~9 min) when "operation in progress"
+          echo "==> Running az containerapp update (retries: 12, 45s apart if busy)..."
           for attempt in $(seq 1 12); do
             if az containerapp update "${UPDATE_ARGS[@]}" > /tmp/az-update.log 2>&1; then
-              echo "Deploy successful"
+              echo "==> Deploy successful."
               exit 0
             fi
-            echo "Attempt $attempt/12: container app update failed or busy. Output:"
+            echo "==> Attempt $attempt/12: container app update failed or busy. Output:"
             cat /tmp/az-update.log
-            echo "Waiting 45s..."
+            echo "==> Waiting 45s before retry..."
             sleep 45
           done
-          echo "Deploy failed after 12 retries. Last error:"
+          echo "==> ERROR: Deploy failed after 12 retries. Last az containerapp update output:"
           cat /tmp/az-update.log
-          echo "If this persists, restart the Container App in Azure Portal and re-run."
+          echo "==> If this persists, restart the Container App in Azure Portal and re-run the workflow."
           exit 1
