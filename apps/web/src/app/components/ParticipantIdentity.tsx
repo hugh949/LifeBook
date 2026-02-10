@@ -47,7 +47,8 @@ export function ParticipantProvider({ children }: { children: React.ReactNode })
     });
     setParticipants(unique);
     if (selectId !== undefined) {
-      const id = selectId && unique.some((p) => p.id === selectId) ? selectId : (selectId || "");
+      const raw = (selectId ?? "").trim();
+      const id = raw && unique.some((p) => (p.id || "").trim() === raw) ? raw : "";
       setParticipantIdState(id || null);
       if (typeof window !== "undefined") {
         if (id) localStorage.setItem(STORAGE_KEY, id);
@@ -62,9 +63,9 @@ export function ParticipantProvider({ children }: { children: React.ReactNode })
       .then((list) => {
         applyParticipants(list, selectId);
         if (selectId === undefined) {
-          const stored = typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
+          const stored = (typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null)?.trim() ?? "";
           const unique = list.filter((p, i, arr) => arr.findIndex((x) => x.id === p.id) === i);
-          const id = stored && unique.some((p) => p.id === stored) ? stored : "";
+          const id = stored && unique.some((p) => (p.id || "").trim() === stored) ? stored : "";
           setParticipantIdState(id || null);
           if (typeof window !== "undefined") {
             if (id) localStorage.setItem(STORAGE_KEY, id);
@@ -78,7 +79,7 @@ export function ParticipantProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     let cancelled = false;
-    const timeoutMs = 12000;
+    const timeoutMs = 6000;
     const timeoutId = setTimeout(() => {
       if (cancelled) return;
       setLoading(false);
@@ -87,9 +88,9 @@ export function ParticipantProvider({ children }: { children: React.ReactNode })
       .then((list) => {
         if (cancelled) return;
         applyParticipants(list);
-        const stored = typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
+        const stored = (typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null)?.trim() ?? "";
         const unique = list.filter((p, i, arr) => arr.findIndex((x) => x.id === p.id) === i);
-        const id = stored && unique.some((p) => p.id === stored) ? stored : "";
+        const id = stored && unique.some((p) => (p.id || "").trim() === stored) ? stored : "";
         setParticipantIdState(id || null);
         if (typeof window !== "undefined") {
           if (id) localStorage.setItem(STORAGE_KEY, id);
@@ -110,9 +111,10 @@ export function ParticipantProvider({ children }: { children: React.ReactNode })
   }, [applyParticipants]);
 
   const setParticipantId = useCallback((id: string | null) => {
-    setParticipantIdState(id);
+    const normalized = (id ?? "").trim() || null;
+    setParticipantIdState(normalized);
     if (typeof window !== "undefined") {
-      if (id) localStorage.setItem(STORAGE_KEY, id);
+      if (normalized) localStorage.setItem(STORAGE_KEY, normalized);
       else localStorage.removeItem(STORAGE_KEY);
     }
   }, []);

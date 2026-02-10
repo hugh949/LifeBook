@@ -75,12 +75,40 @@ export default function AppNav() {
               })()}
           </select>
         </label>
-        <Link href="/talk/session">My Memories</Link>
-        <Link href="/bank">Shared Memories</Link>
+        <Link
+          href="/talk/session"
+          onClick={(e) => loading && e.preventDefault()}
+          style={{
+            pointerEvents: loading ? "none" : undefined,
+            opacity: loading ? 0.6 : undefined,
+            cursor: loading ? "not-allowed" : undefined,
+          }}
+          aria-disabled={loading}
+        >
+          My Memories
+        </Link>
+        <Link
+          href="/bank"
+          onClick={(e) => loading && e.preventDefault()}
+          style={{
+            pointerEvents: loading ? "none" : undefined,
+            opacity: loading ? 0.6 : undefined,
+            cursor: loading ? "not-allowed" : undefined,
+          }}
+          aria-disabled={loading}
+        >
+          Shared Memories
+        </Link>
         <button
           type="button"
           className="app-nav-link-btn"
-          onClick={() => setFeedbackOpen(true)}
+          onClick={() => !loading && setFeedbackOpen(true)}
+          disabled={loading}
+          style={{
+            opacity: loading ? 0.6 : undefined,
+            cursor: loading ? "not-allowed" : undefined,
+          }}
+          aria-disabled={loading}
         >
           App Feedback
         </button>

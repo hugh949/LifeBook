@@ -81,6 +81,7 @@ function isStubMediaUrl(url: string | null | undefined): boolean {
 
 export default function BankPage() {
   const { participantId } = useParticipantIdentity();
+  const normalizedParticipantId = (participantId ?? "").trim() || null;
   const [moments, setMoments] = useState<Moment[]>([]);
   const [sharedStories, setSharedStories] = useState<SharedStory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -490,7 +491,7 @@ export default function BankPage() {
         }
         return (
         <div className="card" style={{ marginBottom: 24, padding: 16 }}>
-          {!participantId && voiceList.some((s) => s.participant_id) && (
+          {!normalizedParticipantId && voiceList.some((s) => s.participant_id) && (
             <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--ink-muted)" }} role="status">
               Select who you are in the top bar to delete your own stories.
             </p>
@@ -569,7 +570,7 @@ export default function BankPage() {
                         >
                           Give Reaction
                         </button>
-                        {participantId && s.participant_id && (s.participant_id.trim() === participantId.trim()) && (
+                        {normalizedParticipantId && s.participant_id && (s.participant_id.trim() === normalizedParticipantId) && (
                           <button
                             type="button"
                             className="btn btn-ghost"
@@ -621,12 +622,12 @@ export default function BankPage() {
                               style={{ fontSize: 13 }}
                               disabled={deleteSending || deleteCode.length !== 4}
                               onClick={async () => {
-                                if (!participantId || deleteCode.length !== 4) return;
+                                if (!normalizedParticipantId || deleteCode.length !== 4) return;
                                 setDeleteSending(true);
                                 setDeleteError(null);
                                 try {
                                   await apiPost<{ deleted: boolean }>(`/voice/stories/shared/${s.id}/delete`, {
-                                    participant_id: participantId,
+                                    participant_id: normalizedParticipantId,
                                     code: deleteCode,
                                   });
                                   setDeleteStoryId(null);
