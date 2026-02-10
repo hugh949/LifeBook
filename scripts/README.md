@@ -198,6 +198,21 @@ Manage and inspect the LifeBook API Container App via Azure CLI (no Portal neede
 
 ---
 
+## azure-storage-cors.sh
+
+Set CORS on the Azure Storage Account (Blob service) so the browser can load photos/audio from blob URLs. Run **once** per storage account (or when you add a new Web App origin).
+
+**Usage:**
+```bash
+AZURE_STORAGE_ACCOUNT=lifebookv1prod AZURE_STORAGE_ACCOUNT_KEY='<key>' ./scripts/azure-storage-cors.sh
+```
+
+**Optional:** `WEB_APP_ORIGIN` or `ALLOWED_ORIGINS` (space-separated) to allow different origins. Defaults include `https://app-lifebook-web-v1.azurewebsites.net` and `http://localhost:3000`.
+
+**When to use:** If loading a photo in the app gives "Preflight response is not successful. Status code: 403" or "access control checks", run this script with the same storage account and key used by the API.
+
+---
+
 ## run-local.sh
 
 Runs the app locally (e.g. Docker Compose). See repo root **README.md**.

@@ -8,25 +8,40 @@ export type RealtimeTokenResponse = {
   stubbed?: boolean;
 };
 
-export async function getRealtimeToken(): Promise<RealtimeTokenResponse> {
-  return apiPost<RealtimeTokenResponse>("/realtime/token", {});
+export type RealtimeTokenRequest = {
+  participant_id?: string;
+  participant_name?: string;
+  moment_id?: string;  // Build 3: recall this past session
+  story_id?: string;  // Build 5: refine this story
+};
+
+export async function getRealtimeToken(
+  options: RealtimeTokenRequest = {}
+): Promise<RealtimeTokenResponse> {
+  return apiPost<RealtimeTokenResponse>("/realtime/token", {
+    participant_id: options.participant_id ?? undefined,
+    participant_name: options.participant_name ?? undefined,
+    moment_id: options.moment_id ?? undefined,
+    story_id: options.story_id ?? undefined,
+  });
 }
 
 /**
  * Connect to OpenAI Realtime API over WebRTC using an ephemeral client secret.
  * SDP handshake is done via our backend proxy to avoid CORS.
- * - Gets mic stream, creates peer connection, creates data channel "oai-events".
+ * - Uses the provided stream or gets mic, creates peer connection, creates data channel "oai-events".
  * - POSTs SDP offer to /realtime/calls, sets answer, wires remote audio to the given audio element.
  */
 export async function connectRealtimeWebRTC(
   ephemeralKey: string,
-  audioElement: HTMLAudioElement
+  audioElement: HTMLAudioElement,
+  existingStream?: MediaStream
 ): Promise<{ pc: RTCPeerConnection; dc: RTCDataChannel }> {
   const pc = new RTCPeerConnection();
   const dc = pc.createDataChannel("oai-events");
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = existingStream ?? (await navigator.mediaDevices.getUserMedia({ audio: true }));
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
     audioElement.autoplay = true;

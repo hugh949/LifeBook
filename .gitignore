@@ -15,6 +15,7 @@ venv/
 out/
 *.egg-info/
 dist/
+services/api/build/
 
 # IDE / OS
 .idea/

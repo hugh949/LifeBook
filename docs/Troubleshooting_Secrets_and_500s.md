@@ -35,6 +35,18 @@ After each deploy, a **new revision** is created. If traffic is still on an old 
 - **Key:** Use **Access keys** for that Storage Account. Copy the key with no extra spaces or newlines. If you pasted from a multi-line display, re-copy a single line and update the GitHub Secret.
 - **Account name:** Must match the Storage Account (e.g. `lifebookv1prod`). Case-sensitive.
 
+### Photos/audio fail to load: 403 CORS (Preflight response is not successful)
+
+The browser loads images and audio directly from Azure Blob URLs. If the Storage Account has no CORS rules, the preflight (OPTIONS) returns **403** and you see “Preflight response is not successful” or “access control checks” in the console.
+
+**Fix:** Set CORS on the Blob service for your Web App origin. From repo root:
+
+```bash
+AZURE_STORAGE_ACCOUNT=lifebookv1prod AZURE_STORAGE_ACCOUNT_KEY='<your-key>' ./scripts/azure-storage-cors.sh
+```
+
+Use your storage account name and key (same as in GitHub Secrets). The script allows `https://app-lifebook-web-v1.azurewebsites.net` and `http://localhost:3000`. To add another origin: `ALLOWED_ORIGINS='https://your-app.azurewebsites.net http://localhost:3000'` (with the same env vars). Then try loading a photo again.
+
 ## 4. DATABASE_URL format
 
 - Use **single** quotes when testing locally; in GitHub Secrets you paste the full URL as one line.
@@ -64,6 +76,41 @@ If you still get 500s after setting `API_UPSTREAM` on the Web App, the Web App m
 
 3. **Set API_UPSTREAM again after deploy (optional):** The deploy workflow sets it automatically. To set manually:  
    `./scripts/set-webapp-api-upstream.sh`
+
+## 8. API proxy error: fetch failed
+
+If you see **"API proxy error: fetch failed. Is API_UPSTREAM set on the Web App? Check Web App Log stream for details."** (502), the web app's proxy tried to call the API at `API_UPSTREAM` but the request failed (connection refused, DNS, or timeout).
+
+**Quick checks in any environment:**
+
+- **Proxy present:** Open `/api/proxy-ping` in the browser. You should get 200 and JSON like `{ "proxy": true, "upstreamSet": true }`. If `upstreamSet` is false, `API_UPSTREAM` is not set (or not visible to the proxy).
+- **API reachable:** Call the API directly at `{API_UPSTREAM}/health` (or `http://localhost:8000/health` locally). If that fails, the proxy will always get "fetch failed".
+
+### Local with Docker (`./scripts/run-local.sh`)
+
+`API_UPSTREAM` is set in `docker-compose.yml` to `http://api:8000`. "Fetch failed" usually means the **API container is not running or not ready**.
+
+1. Use one command so both API and web start: `./scripts/run-local.sh` (or `docker compose up --build`) from the repo root.
+2. Wait until the API is up (e.g. `http://localhost:8000/health` returns 200) before using http://localhost:3000.
+3. If it still fails: `docker compose ps` — `api` and `web` should be Up. Restart with `docker compose up --build` if the API exited.
+
+### Local without Docker (e.g. `npm run dev` in `apps/web`)
+
+The proxy defaults to `http://localhost:8000` when `API_UPSTREAM` is not set. "Fetch failed" means nothing is listening on port 8000.
+
+1. Start the API on port 8000 (with Postgres running and `DATABASE_URL` in `.env`):  
+   `cd services/api && pip install . && alembic upgrade head && uvicorn app.main:app --reload --port 8000`
+2. In another terminal: `cd apps/web && npm run dev`.
+3. Optional: in `apps/web/.env.local` set `API_UPSTREAM=http://localhost:8000` (see `apps/web/.env.local.example`).
+
+### Production (Azure Web App)
+
+The Web App must have **API_UPSTREAM** set to your Container App URL (e.g. `https://<container-app-name>.azurecontainerapps.io`). The deploy workflow sets it; "fetch failed" means it's missing/wrong or the Container App is down.
+
+1. **Check API_UPSTREAM:** Azure Portal → your **Web App** → **Configuration** → **Application settings**. Ensure `API_UPSTREAM` exists and is the full Container App URL (https, no trailing slash).
+2. **Set or fix it:** Run `./scripts/set-webapp-api-upstream.sh` from the repo root, or set `API_UPSTREAM` manually in the Web App's Application settings.
+3. **Confirm the API is up:** Open `https://<your-container-app-url>/health` in a browser; it should return 200.
+4. **Web App logs:** Web App → **Log stream**. Reproduce the error and look for `[LifeBook proxy] upstream request failed` to see the exact failure (see section 7).
 
 ## 7. No log stream messages
 

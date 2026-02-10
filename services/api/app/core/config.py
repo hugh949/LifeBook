@@ -21,4 +21,13 @@ class Settings(BaseModel):
     openai_realtime_model: str = os.getenv("OPENAI_REALTIME_MODEL", "")
     openai_text_model: str = os.getenv("OPENAI_TEXT_MODEL", "")
 
+    # Azure Speech / Speaker Recognition (Voice ID): key, region, and optional endpoint
+    azure_speech_key: str = os.getenv("AZURE_SPEECH_KEY", "")
+    azure_speech_region: str = os.getenv("AZURE_SPEECH_REGION", "")
+    azure_speech_endpoint: str = os.getenv("AZURE_SPEECH_ENDPOINT", "")
+
+    # Picovoice Eagle (Voice ID): default backend when key is set
+    picovoice_access_key: str = os.getenv("PICOVOICE_ACCESS_KEY", "")
+    voice_id_backend: str = os.getenv("VOICE_ID_BACKEND", "eagle")  # "eagle" | "azure"
+
 settings = Settings()

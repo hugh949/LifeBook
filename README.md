@@ -14,10 +14,12 @@ cd LifeBook
 
 # 2. Create env (no secrets required for local)
 cp .env.example .env
+# One .env at root for local; same keys go to Azure for production. See docs/Env_Files_Where_to_Edit.md.
 
 # 3. Start everything
 docker compose up --build
 ```
+(See **`docs/Commands_Reference.md`** for this and other commands — migrations, Voice ID test, etc. — with full paths so you can run from anywhere.)
 
 Then open **http://localhost:3000**. The API is at http://localhost:8000 (health: http://localhost:8000/health).
 
@@ -25,7 +27,7 @@ Then open **http://localhost:3000**. The API is at http://localhost:8000 (health
 - **See moments:** [Memory Bank](http://localhost:3000/bank)
 - **Older mode / Talk:** [Older Mode](http://localhost:3000/older) (voice is stubbed until you add an OpenAI key)
 
-No Azure or OpenAI keys are required for this. Uploads use a local stub; Realtime voice returns a “stubbed” message until you set `OPENAI_API_KEY` in `.env`.
+No Azure or OpenAI keys are required for this. Uploads use a local stub; Realtime voice returns a “stubbed” message until you set `OPENAI_API_KEY` in `.env`. **Voice ID** (identify speaker at session start) uses **Picovoice Eagle** by default: add `PICOVOICE_ACCESS_KEY` from [Picovoice Console](https://console.picovoice.ai) to enable it; optional `VOICE_ID_BACKEND=azure` if you use Azure Speaker Recognition.
 
 **Local validation (Phase 1):** After starting, confirm (1) the app loads at http://localhost:3000, (2) Older → Talk works (or shows the stubbed message), and (3) http://localhost:3000/api/proxy-ping returns 200 and JSON with `"proxy": true`. Then your local environment is working.
 
@@ -81,6 +83,8 @@ Right now the product is in **discovery**: we’re figuring out which features p
 | Doc | Purpose |
 |-----|--------|
 | **`First_Time_Deploy.md`** | **First-time Azure deploy checklist + iterating** |
+| **`docs/Commands_Reference.md`** | **When to run what (migrations, Voice ID test, app) — single list with full paths** |
+| **`docs/Env_Files_Where_to_Edit.md`** | **Which .env to edit (root vs services/api vs web)** |
 | **`docs/Data_Preservation_Shared_Memory.md`** | **How stories, voice, photos & transcripts are preserved in Azure** |
 | `Azure_Deployment_Appendix.md` | Full Azure reference (secrets, Key Vault, hardening) |
 | `V1_Product_Spec.md` | MVP scope and behaviour |

@@ -26,7 +26,7 @@ After merging to `main` and running the **Deploy All** workflow (or deploy-api +
    `PROD_WEB_URL=https://app-lifebook-web-v1.azurewebsites.net ./scripts/verify-prod.sh`  
    Exits 0 if both checks pass, 1 otherwise.
 
-4. **Smoke test:** Open the production URL in a browser, go to Older → Talk, and confirm the session message (e.g. includes “(Voice pipeline OK.)” if that change was deployed).
+4. **Smoke test:** Open the production URL in a browser, go to Older → Talk, and confirm the voice session connects and that the live message appears (e.g. You're live. Speak naturally — one question at a time.).
 
 ## Rollback or abandon
 

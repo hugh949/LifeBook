@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Text, Integer, Float, ForeignKey, DateTime
+from sqlalchemy import Column, String, Text, Integer, Float, ForeignKey, DateTime, LargeBinary
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase
 import enum
@@ -81,8 +81,12 @@ class Moment(Base):
     place_hint = Column(String(255))
     source = Column(String(32), nullable=False)  # older_session | family_upload | mixed
     trailer_config_json = Column(JSONB)
+    participant_id = Column(ID_TYPE, ForeignKey("voice_participants.id"))  # Build 2: who this session belongs to
+    session_turns_json = Column(JSONB)  # Build 2: [{ "role": "user"|"assistant", "content": "..." }, ...]
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)  # soft-delete for recall list
+    shared_at = Column(DateTime(timezone=True), nullable=True)  # NULL = private; set when shared with family
 
 
 class MomentAsset(Base):
@@ -108,3 +112,43 @@ class Transcript(Base):
     text_en = Column(Text)
     timestamps_json = Column(JSONB)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class VoiceParticipant(Base):
+    """Who is speaking in a voice session; used for per-participant history and greeting by name."""
+    __tablename__ = "voice_participants"
+    id = Column(ID_TYPE, primary_key=True, default=uuid7_str)
+    family_id = Column(ID_TYPE, ForeignKey("families.id"), nullable=False)
+    label = Column(String(255), nullable=False)  # display name, e.g. "Older adult", "Sarah"
+    azure_speaker_profile_id = Column(String(36), nullable=True)  # Voice ID: Azure Speaker Recognition profile
+    enrollment_status = Column(String(32), nullable=True)  # Enrolled | Enrolling | Training; only Enrolled used for identify
+    eagle_profile_data = Column(LargeBinary, nullable=True)  # Voice ID: Picovoice Eagle serialized profile
+    eagle_pending_pcm = Column(LargeBinary, nullable=True)  # Voice ID: accumulated PCM until enrollment 100%
+    recall_passphrase = Column(String(512), nullable=True)  # Spoken phrase to unlock Recall lists (stored normalized)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class SharedStoryListen(Base):
+    """Build 7: Track when a participant has listened to a shared story (for 'new stories you haven't heard')."""
+    __tablename__ = "shared_story_listens"
+    participant_id = Column(ID_TYPE, ForeignKey("voice_participants.id"), primary_key=True)
+    moment_id = Column(ID_TYPE, ForeignKey("moments.id"), primary_key=True)
+    listened_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class VoiceStory(Base):
+    """Build 5: Story from voice discussion. draft/final = private (Recall past stories); shared = in memory bank."""
+    __tablename__ = "voice_stories"
+    id = Column(ID_TYPE, primary_key=True, default=uuid7_str)
+    family_id = Column(ID_TYPE, ForeignKey("families.id"), nullable=False)
+    participant_id = Column(ID_TYPE, ForeignKey("voice_participants.id"), nullable=False)
+    source_moment_id = Column(ID_TYPE, ForeignKey("moments.id"), nullable=True)
+    title = Column(String(512), nullable=True)
+    summary = Column(Text, nullable=True)
+    tags_json = Column(JSONB, nullable=True)  # ["tag1", "tag2"] like recall list
+    draft_text = Column(Text, nullable=True)
+    final_audio_asset_id = Column(ID_TYPE, ForeignKey("assets.id"), nullable=True)
+    status = Column(String(32), nullable=False)  # draft | final | shared
+    shared_moment_id = Column(ID_TYPE, ForeignKey("moments.id"), nullable=True)  # set when moved to memory bank
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -14,6 +14,7 @@
 # Optional (synced to Container App on deploy; else set in Azure Portal):
 #   DATABASE_URL, AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_ACCOUNT_KEY, OPENAI_API_KEY, CORS_ALLOW_ORIGINS
 #   AZURE_STORAGE_CONTAINER_PHOTOS, AZURE_STORAGE_CONTAINER_AUDIO
+#   PICOVOICE_ACCESS_KEY, VOICE_ID_BACKEND (Voice ID, default Eagle), or AZURE_SPEECH_KEY, AZURE_SPEECH_REGION, AZURE_SPEECH_ENDPOINT (Voice ID when backend=azure)
 #
 # GitHub variables (or set in workflow):
 #   AZURE_RESOURCE_GROUP  - e.g. rg-lifebook-v1
@@ -194,6 +195,11 @@ jobs:
           CORS_ALLOW_ORIGINS: ${{ secrets.CORS_ALLOW_ORIGINS }}
           AZURE_STORAGE_CONTAINER_PHOTOS: ${{ secrets.AZURE_STORAGE_CONTAINER_PHOTOS }}
           AZURE_STORAGE_CONTAINER_AUDIO: ${{ secrets.AZURE_STORAGE_CONTAINER_AUDIO }}
+          PICOVOICE_ACCESS_KEY: ${{ secrets.PICOVOICE_ACCESS_KEY }}
+          VOICE_ID_BACKEND: ${{ vars.VOICE_ID_BACKEND || secrets.VOICE_ID_BACKEND || 'eagle' }}
+          AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
+          AZURE_SPEECH_REGION: ${{ secrets.AZURE_SPEECH_REGION }}
+          AZURE_SPEECH_ENDPOINT: ${{ secrets.AZURE_SPEECH_ENDPOINT }}
         run: |
           set -e
           # Confirm which secrets are set (values never printed)
@@ -205,6 +211,11 @@ jobs:
           [ -n "$CORS_ALLOW_ORIGINS" ] && echo "  CORS_ALLOW_ORIGINS: set" || echo "  CORS_ALLOW_ORIGINS: (empty)"
           [ -n "$AZURE_STORAGE_CONTAINER_PHOTOS" ] && echo "  AZURE_STORAGE_CONTAINER_PHOTOS: set" || echo "  AZURE_STORAGE_CONTAINER_PHOTOS: (empty, will use default photos)"
           [ -n "$AZURE_STORAGE_CONTAINER_AUDIO" ] && echo "  AZURE_STORAGE_CONTAINER_AUDIO: set" || echo "  AZURE_STORAGE_CONTAINER_AUDIO: (empty, will use default audio)"
+          [ -n "$PICOVOICE_ACCESS_KEY" ] && echo "  PICOVOICE_ACCESS_KEY: set" || echo "  PICOVOICE_ACCESS_KEY: (empty, Voice ID disabled when backend=eagle)"
+          [ -n "$VOICE_ID_BACKEND" ] && echo "  VOICE_ID_BACKEND: $VOICE_ID_BACKEND" || echo "  VOICE_ID_BACKEND: (empty, default eagle)"
+          [ -n "$AZURE_SPEECH_KEY" ] && echo "  AZURE_SPEECH_KEY: set" || echo "  AZURE_SPEECH_KEY: (empty)"
+          [ -n "$AZURE_SPEECH_REGION" ] && echo "  AZURE_SPEECH_REGION: set" || echo "  AZURE_SPEECH_REGION: (empty)"
+          [ -n "$AZURE_SPEECH_ENDPOINT" ] && echo "  AZURE_SPEECH_ENDPOINT: set" || echo "  AZURE_SPEECH_ENDPOINT: (empty)"
           # Brief wait so any just-finished operation can clear (was 2 min; 30s is enough when app is idle)
           echo "Waiting 30s before container app update..."
           sleep 30
@@ -217,6 +228,11 @@ jobs:
           [ -n "$CORS_ALLOW_ORIGINS" ] && ENV_VARS+=( "CORS_ALLOW_ORIGINS=$CORS_ALLOW_ORIGINS" )
           [ -n "$AZURE_STORAGE_CONTAINER_PHOTOS" ] && ENV_VARS+=( "AZURE_STORAGE_CONTAINER_PHOTOS=$AZURE_STORAGE_CONTAINER_PHOTOS" )
           [ -n "$AZURE_STORAGE_CONTAINER_AUDIO" ] && ENV_VARS+=( "AZURE_STORAGE_CONTAINER_AUDIO=$AZURE_STORAGE_CONTAINER_AUDIO" )
+          [ -n "$PICOVOICE_ACCESS_KEY" ] && ENV_VARS+=( "PICOVOICE_ACCESS_KEY=$PICOVOICE_ACCESS_KEY" )
+          [ -n "$VOICE_ID_BACKEND" ] && ENV_VARS+=( "VOICE_ID_BACKEND=$VOICE_ID_BACKEND" )
+          [ -n "$AZURE_SPEECH_KEY" ] && ENV_VARS+=( "AZURE_SPEECH_KEY=$AZURE_SPEECH_KEY" )
+          [ -n "$AZURE_SPEECH_REGION" ] && ENV_VARS+=( "AZURE_SPEECH_REGION=$AZURE_SPEECH_REGION" )
+          [ -n "$AZURE_SPEECH_ENDPOINT" ] && ENV_VARS+=( "AZURE_SPEECH_ENDPOINT=$AZURE_SPEECH_ENDPOINT" )
           ENV_VARS+=( "PORT=80" )
           # Ingress must target port 80 to match app (Azure Container Apps expects 80 unless overridden)
           az containerapp ingress update -g ${{ env.RESOURCE_GROUP }} -n ${{ env.CONTAINER_APP }} --target-port 80 --output none

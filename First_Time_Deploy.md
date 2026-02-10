@@ -35,6 +35,8 @@ In the **Container App** (API) → **Containers** → your container → **Envir
 | `AZURE_STORAGE_CONTAINER_AUDIO` | `audio` |
 | `OPENAI_API_KEY` | Your OpenAI key (for voice; optional for photo-only) |
 | `CORS_ALLOW_ORIGINS` | `https://app-lifebook-web-v1.azurewebsites.net` (your Web App URL; add `http://localhost:3000` if you need local dev against this API) |
+| `PICOVOICE_ACCESS_KEY` | (Optional) Picovoice key from [Picovoice Console](https://console.picovoice.ai). Enables Voice ID (identify speaker at session start). Default backend is Eagle. |
+| `VOICE_ID_BACKEND` | (Optional) `eagle` (default) or `azure`. Use `azure` only if you have Azure Speaker Recognition approved and set `AZURE_SPEECH_*` below. |
 
 ---
 
@@ -77,6 +79,16 @@ In your repo: **Settings → Secrets and variables → Actions**.
   Your OpenAI API key. If missing, the API returns a “stubbed” response and the app shows “Voice isn’t connected (no API key)”.
 - **`CORS_ALLOW_ORIGINS`**  
   Your Web App URL, e.g. `https://app-lifebook-web-v1.azurewebsites.net`. The deploy workflow syncs this to the Container App so the API allows requests from the web app.
+
+**Secrets for Voice ID (optional):**
+
+Voice ID (identify speaker at session start, greet by name) uses **Picovoice Eagle** by default. No Microsoft approval required.
+
+- **`PICOVOICE_ACCESS_KEY`** — Key from [Picovoice Console](https://console.picovoice.ai). If set (and `VOICE_ID_BACKEND` is not `azure`), Voice ID uses Eagle.
+- **`VOICE_ID_BACKEND`** — (Optional) `eagle` (default) or `azure`. Set to `azure` only if you use Azure Speaker Recognition and have it approved.
+- **`AZURE_SPEECH_KEY`** — Only when `VOICE_ID_BACKEND=azure`. Key from your Azure Speech resource.
+- **`AZURE_SPEECH_REGION`** — Only when using Azure. Region of the Speech resource, e.g. `westus3`.
+- **`AZURE_SPEECH_ENDPOINT`** — (Optional) Full endpoint URL when using Azure. If set, the app uses this instead of building the URL from region.
 
 **Variables (optional):**  
 If you used different names, add: `AZURE_WEBAPP_NAME`, `AZURE_RESOURCE_GROUP`, `AZURE_ACR_NAME`, `AZURE_CONTAINER_APP`. Defaults are in the table in `Azure_Deployment_Appendix.md` § 11. The workflow uses `AZURE_CONTAINER_APP` to set the Web App’s `API_UPSTREAM` so **Talk** and `/api` reach the API.

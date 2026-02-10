@@ -7,7 +7,16 @@ import sys
 from pathlib import Path
 
 # Ensure project root is on path so "app" can be imported when Alembic runs
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_api_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_api_root))
+
+# Load .env from repo root only (single source of truth)
+try:
+    from dotenv import load_dotenv
+    _project_root = _api_root.parent.parent
+    load_dotenv(_project_root / ".env")
+except ImportError:
+    pass
 
 from app.db.models import Base
 

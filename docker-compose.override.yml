@@ -6,7 +6,7 @@ services:
   api:
     volumes:
       - ./services/api/app:/app/app
-    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+    command: ["sh", "-c", "python /app/scripts/wait_for_db.py && (alembic upgrade head || echo '[STARTUP] Migration failed — starting API anyway.' >&2); exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
 
   web:
     volumes:

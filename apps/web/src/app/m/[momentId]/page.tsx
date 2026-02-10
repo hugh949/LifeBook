@@ -3,6 +3,14 @@ import { AddComment } from "./AddComment";
 
 const API_BASE = process.env.API_UPSTREAM || "http://localhost:8000";
 
+type MomentAsset = {
+  id: string;
+  type: string;
+  role: string;
+  playback_url?: string | null;
+  duration_sec?: number | null;
+};
+
 type Moment = {
   id: string;
   title: string | null;
@@ -12,6 +20,7 @@ type Moment = {
   created_at: string;
   thumbnail_url?: string | null;
   image_url?: string | null;
+  assets?: MomentAsset[] | null;
 };
 
 function isStubMediaUrl(url: string | null | undefined): boolean {
@@ -97,6 +106,29 @@ export default async function MomentPage({ params }: { params: Promise<{ momentI
             <p style={{ margin: 0, color: "var(--ink-muted)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
               {moment.summary}
             </p>
+          )}
+          {moment.assets && moment.assets.some((a) => a.playback_url && (a.type === "audio" || a.role === "session_audio")) && (
+            <div style={{ marginTop: "1rem" }}>
+              {moment.assets
+                .filter((a) => a.playback_url && (a.type === "audio" || a.role === "session_audio"))
+                .map((a) => (
+                  <div key={a.id} style={{ marginBottom: 12 }}>
+                    <audio
+                      controls
+                      src={a.playback_url!}
+                      style={{ width: "100%", maxWidth: 400 }}
+                      preload="metadata"
+                    >
+                      Your browser does not support audio playback.
+                    </audio>
+                    {a.duration_sec != null && a.duration_sec > 0 && (
+                      <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--ink-faint)" }}>
+                        {Math.round(a.duration_sec)}s
+                      </p>
+                    )}
+                  </div>
+                ))}
+            </div>
           )}
         </div>
       </article>

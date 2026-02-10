@@ -1,10 +1,21 @@
 // Use /api so Next.js rewrites to backend (Docker: api:8000, local: localhost:8000)
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "/api";
 
-function logApiError(method: string, path: string, status: number, url: string, body: string): void {
-  const detail = body.length > 500 ? body.slice(0, 500) + "..." : body;
+function logApiError(
+  method: string,
+  path: string,
+  status: number,
+  url: string,
+  body: string,
+  parsedMessage?: string
+): void {
+  let detail = body.length > 500 ? body.slice(0, 500) + "..." : body;
+  if (!detail || detail.trim() === "" || detail.trim() === "{}") {
+    detail = "(empty)";
+  }
+  const message = parsedMessage ?? detail;
   console.error(
-    `[LifeBook API] ${method} ${path} failed:`,
+    `[LifeBook API] ${method} ${path} failed (${status}): ${message}`,
     { status, url, responseBody: detail }
   );
 }
@@ -28,7 +39,7 @@ export async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, cache: "no-store" });
   if (!res.ok) {
     const { msg, body } = await parseErrorResponse(res);
-    logApiError("GET", path, res.status, url, body);
+    logApiError("GET", path, res.status, url, body, msg);
     throw new Error(msg || `GET ${path} failed: ${res.status}`);
   }
   return res.json() as Promise<T>;
@@ -44,7 +55,7 @@ export async function apiPost<T>(path: string, body: unknown, init?: RequestInit
   });
   if (!res.ok) {
     const { msg, body: resBody } = await parseErrorResponse(res);
-    logApiError("POST", path, res.status, url, resBody);
+    logApiError("POST", path, res.status, url, resBody, msg);
     throw new Error(msg || `POST ${path} failed: ${res.status}`);
   }
   return res.json() as Promise<T>;
@@ -60,8 +71,35 @@ export async function apiPatch<T>(path: string, body: unknown, init?: RequestIni
   });
   if (!res.ok) {
     const { msg, body: resBody } = await parseErrorResponse(res);
-    logApiError("PATCH", path, res.status, url, resBody);
+    logApiError("PATCH", path, res.status, url, resBody, msg);
     throw new Error(msg || `PATCH ${path} failed: ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function apiDelete(path: string, init?: RequestInit): Promise<void> {
+  const url = `${API_BASE}${path}`;
+  const res = await fetch(url, { method: "DELETE", ...init });
+  if (!res.ok) {
+    const { msg, body } = await parseErrorResponse(res);
+    logApiError("DELETE", path, res.status, url, body, msg);
+    throw new Error(msg || `DELETE ${path} failed: ${res.status}`);
+  }
+}
+
+/** POST multipart/form-data (e.g. file upload). Do not set Content-Type so browser sets boundary. */
+export async function apiPostFormData<T>(path: string, formData: FormData, init?: RequestInit): Promise<T> {
+  const url = `${API_BASE}${path}`;
+  const res = await fetch(url, {
+    method: "POST",
+    body: formData,
+    ...init,
+    headers: { ...(init?.headers || {}) },
+  });
+  if (!res.ok) {
+    const { msg, body: resBody } = await parseErrorResponse(res);
+    logApiError("POST", path, res.status, url, resBody, msg);
+    throw new Error(msg || `POST ${path} failed: ${res.status}`);
   }
   return res.json() as Promise<T>;
 }

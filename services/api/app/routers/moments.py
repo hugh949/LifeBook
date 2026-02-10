@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
@@ -54,6 +55,8 @@ def _moment_to_response(m, thumb_url: str | None = None, image_url: str | None =
         "source": m.source,
         "created_at": m.created_at.isoformat() if m.created_at else None,
         "updated_at": m.updated_at.isoformat() if m.updated_at else None,
+        "shared_at": m.shared_at.isoformat() if getattr(m, "shared_at", None) else None,
+        "participant_id": str(m.participant_id) if m.participant_id else None,
     }
     if thumb_url is not None:
         out["thumbnail_url"] = thumb_url
@@ -80,11 +83,24 @@ def list_moments(
     q: str | None = None,
     from_: str | None = None,
     to: str | None = None,
+    visibility: str | None = None,  # "shared" | "private"; default shared for backward compat
+    participant_id: str | None = None,
     db: Session = Depends(get_db),
 ):
-    logger.info("moments list: personId=%s q=%s", personId, (q[:50] + "..." if q and len(q) > 50 else q))
+    logger.info("moments list: personId=%s q=%s visibility=%s participant_id=%s", personId, (q[:50] + "..." if q and len(q) > 50 else q), visibility, participant_id)
     try:
         query = db.query(models.Moment).filter(models.Moment.family_id == DEFAULT_FAMILY_ID)
+        # Private vs shared: shared_at IS NOT NULL = shared with family
+        if visibility == "private":
+            if not participant_id:
+                raise HTTPException(status_code=400, detail="participant_id required when visibility=private")
+            query = query.filter(
+                models.Moment.participant_id == participant_id,
+                models.Moment.shared_at.is_(None),
+            )
+        else:
+            # default: shared only (backward compat for Memory Bank)
+            query = query.filter(models.Moment.shared_at.isnot(None))
         if q:
             query = query.filter(
                 (models.Moment.title.ilike(f"%{q}%")) | (models.Moment.summary.ilike(f"%{q}%"))
@@ -201,6 +217,8 @@ def create_moment(body: MomentCreate, db: Session = Depends(get_db)):
             language=body.language,
             tags_json=body.tags_json,
             source=body.source,
+            participant_id=body.participant_id,
+            shared_at=None,  # new content is private until shared
         )
         db.add(moment)
         db.commit()
@@ -217,6 +235,25 @@ def create_moment(body: MomentCreate, db: Session = Depends(get_db)):
     except Exception as e:
         logger.exception("create_moment error")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{moment_id}/share")
+def share_moment(moment_id: str, db: Session = Depends(get_db)):
+    """Mark moment as shared with family (idempotent)."""
+    moment = (
+        db.query(models.Moment)
+        .filter(models.Moment.id == moment_id, models.Moment.family_id == DEFAULT_FAMILY_ID)
+        .first()
+    )
+    if not moment:
+        raise HTTPException(status_code=404, detail="Moment not found")
+    if moment.shared_at is None:
+        moment.shared_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(moment)
+    raw_thumb, raw_img = _first_photo_urls(db, moment_id)
+    thumb_url, image_url = _sign_display_urls(raw_thumb, raw_img)
+    return _moment_to_response(moment, thumb_url=thumb_url, image_url=image_url)
 
 
 @router.patch("/{moment_id}")
@@ -236,11 +273,23 @@ def patch_moment(moment_id: str, body: MomentPatch, db: Session = Depends(get_db
             moment.title = body.title
         if body.summary is not None:
             moment.summary = body.summary
+        if body.add_voice_comment_asset_id and body.add_voice_comment_asset_id.strip():
+            # Link audio asset to moment as voice_note (voice comment)
+            link = models.MomentAsset(
+                moment_id=moment.id,
+                asset_id=body.add_voice_comment_asset_id.strip(),
+                role="voice_note",
+            )
+            db.add(link)
         db.commit()
         db.refresh(moment)
         raw_thumb, raw_img = _first_photo_urls(db, moment_id)
         thumb_url, image_url = _sign_display_urls(raw_thumb, raw_img)
-        return _moment_to_response(moment, thumb_url=thumb_url, image_url=image_url)
+        assets = _load_moment_assets(db, moment_id)
+        transcripts = _load_moment_transcripts(db, moment_id)
+        return _moment_to_response(
+            moment, thumb_url=thumb_url, image_url=image_url, assets=assets, transcripts=transcripts
+        )
     except HTTPException:
         raise
     except Exception as e:

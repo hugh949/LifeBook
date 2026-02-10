@@ -9,17 +9,21 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - lifebook
 
   api:
     build: ./services/api
     env_file:
       - ./.env
     environment:
-      DATABASE_URL: "postgresql://lifebook:lifebook@db:5432/lifebook"
+      DATABASE_URL: "postgresql://lifebook:lifebook@db:5432/lifebook?sslmode=disable"
     ports:
       - "8000:8000"
     depends_on:
       - db
+    networks:
+      - lifebook
 
   web:
     build: ./apps/web
@@ -32,6 +36,12 @@ services:
       - "3000:3000"
     depends_on:
       - api
+    networks:
+      - lifebook
+
+networks:
+  lifebook:
+    driver: bridge
 
 volumes:
   pgdata:

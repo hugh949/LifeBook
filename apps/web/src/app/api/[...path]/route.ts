@@ -72,7 +72,7 @@ async function proxy(
   let body: BodyInit | undefined;
   if (method !== "GET" && method !== "HEAD") {
     try {
-      body = await request.text();
+      body = await request.arrayBuffer();
     } catch {
       // no body
     }
@@ -86,7 +86,6 @@ async function proxy(
       cache: "no-store",
     });
 
-    let responseBody = await res.text();
     const responseHeaders = new Headers();
     responseHeaders.set(PROXY_HEADER, PROXY_HEADER_VALUE);
 
@@ -102,11 +101,29 @@ async function proxy(
       }
     });
 
+    const contentType = (res.headers.get("content-type") || "").toLowerCase();
+    const isBinary =
+      contentType.startsWith("audio/") ||
+      contentType.startsWith("image/") ||
+      contentType.startsWith("video/") ||
+      contentType === "application/octet-stream";
+
+    if (isBinary) {
+      // Pass through binary (e.g. /voice/narrate returns audio/mpeg) without corrupting
+      const buffer = await res.arrayBuffer();
+      return new NextResponse(buffer, {
+        status: res.status,
+        statusText: res.statusText,
+        headers: responseHeaders,
+      });
+    }
+
+    let responseBody = await res.text();
+
     // If upstream returns 5xx with non-JSON body, normalize so the client always gets parseable JSON
     if (res.status >= 500 && res.status < 600) {
-      const ct = (res.headers.get("content-type") || "").toLowerCase();
       const looksLikeJson =
-        ct.includes("application/json") ||
+        contentType.includes("application/json") ||
         (responseBody?.trim().startsWith("{") && responseBody?.trim().endsWith("}"));
       if (!looksLikeJson) {
         responseBody = JSON.stringify({

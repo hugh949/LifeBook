@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.logging_config import setup_logging
-from app.routers import health, media, realtime, sessions, moments
+from app.routers import health, media, realtime, sessions, moments, voice
 
 setup_logging()
 logger = logging.getLogger("lifebook.api")
@@ -27,6 +27,9 @@ def startup_log_config():
         "CORS_ALLOW_ORIGINS": settings.cors_allow_origins[:80] + ("..." if len(settings.cors_allow_origins) > 80 else ""),
         "photos_container": settings.photos_container,
         "audio_container": settings.audio_container,
+        "AZURE_SPEECH_KEY_set": bool((settings.azure_speech_key or "").strip()),
+        "AZURE_SPEECH_REGION": (settings.azure_speech_region or "").strip() or "(empty)",
+        "AZURE_SPEECH_ENDPOINT_set": bool((settings.azure_speech_endpoint or "").strip()),
     }
     logger.info("LifeBook API startup config: %s", cfg)
 
@@ -64,6 +67,7 @@ app.include_router(media.router)
 app.include_router(realtime.router)
 app.include_router(sessions.router)
 app.include_router(moments.router)
+app.include_router(voice.router)
 
 
 # Register after routers so we override Starlette's default 500 "Internal Server Error"
