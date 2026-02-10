@@ -5,10 +5,21 @@ import React, { useState, useRef, useEffect } from "react";
 const TO_EMAIL = "hrashid@xavor.com";
 const SUBJECT = "LifeBook App Feedback";
 
+/** Web Speech API (not in all TS libs). Declare so build succeeds in Node/CI. */
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((ev: { resultIndex: number; results: unknown }) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+}
 declare global {
   interface Window {
-    SpeechRecognition?: typeof SpeechRecognition;
-    webkitSpeechRecognition?: typeof SpeechRecognition;
+    SpeechRecognition?: new () => SpeechRecognitionLike;
+    webkitSpeechRecognition?: new () => SpeechRecognitionLike;
   }
 }
 
@@ -22,7 +33,7 @@ export default function FeedbackModal({
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const speechSupported =
     typeof window !== "undefined" &&
     (window.SpeechRecognition != null || window.webkitSpeechRecognition != null);
@@ -45,15 +56,17 @@ export default function FeedbackModal({
   function startRecording() {
     if (!speechSupported) return;
     const Klass = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Klass) return;
     const rec = new Klass();
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = "en-US";
-    rec.onresult = (e: SpeechRecognitionEvent) => {
+    rec.onresult = (e: { resultIndex: number; results: unknown }) => {
+      const results = e.results as { [i: number]: { isFinal: boolean; 0: { transcript: string } } };
       const last = e.resultIndex;
-      const result = e.results[last];
-      if (result.isFinal) {
-        const transcript = result[0].transcript;
+      const result = results[last];
+      if (result?.isFinal) {
+        const transcript = result[0]?.transcript ?? "";
         setText((prev) => (prev ? prev + " " + transcript : transcript));
       }
     };
