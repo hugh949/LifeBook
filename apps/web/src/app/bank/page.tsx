@@ -490,6 +490,11 @@ export default function BankPage() {
         }
         return (
         <div className="card" style={{ marginBottom: 24, padding: 16 }}>
+          {!participantId && voiceList.some((s) => s.participant_id) && (
+            <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--ink-muted)" }} role="status">
+              Select who you are in the top bar to delete your own stories.
+            </p>
+          )}
           <h2 style={{ fontSize: "1rem", margin: "0 0 8px", fontWeight: 600 }}>Voice stories</h2>
           <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--ink-muted)" }}>
             Stories shared from voice sessions. View, listen, and add reactions without leaving this page.
@@ -564,7 +569,7 @@ export default function BankPage() {
                         >
                           Give Reaction
                         </button>
-                        {participantId && s.participant_id && s.participant_id === participantId && (
+                        {participantId && s.participant_id && (s.participant_id.trim() === participantId.trim()) && (
                           <button
                             type="button"
                             className="btn btn-ghost"

@@ -258,7 +258,7 @@ export default function SessionPage() {
     setRecallSessions(null);
     setStoryList(null);
     setContinuingFromTags(recallTags?.length ? recallTags : null);
-    let effectiveParticipantId = participantId;
+    let effectiveParticipantId = ((participantId || contextParticipantId) ?? "") || undefined;
     let effectiveLabel: string | null = null;
 
     try {
@@ -280,6 +280,7 @@ export default function SessionPage() {
             effectiveParticipantId = result.participant_id;
             effectiveLabel = result.label ?? null;
             setParticipantId(result.participant_id);
+            setContextParticipantId(result.participant_id);
           }
         } catch {
           // ignore identify errors; continue without participant_id
