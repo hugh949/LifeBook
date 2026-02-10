@@ -35,25 +35,28 @@ export default function AppNav() {
       </div>
       <div className="app-nav-spacer" aria-hidden="true" />
       <div className="app-nav-links">
-        {!loading && (
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14 }}>
-            <span style={{ color: "var(--ink-muted)" }}>I&rsquo;m</span>
-            <select
-              value={participantId ?? ""}
-              onChange={(e) => setParticipantId(e.target.value || null)}
-              style={{
-                minHeight: 44,
-                padding: "10px 12px",
-                borderRadius: 6,
-                border: "1px solid var(--ink-muted)",
-                background: "var(--bg)",
-                color: "var(--ink)",
-                fontSize: 16,
-              }}
-              aria-label="Who is using the app"
-            >
-              <option value="">New User</option>
-              {(() => {
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14 }}>
+          <span style={{ color: "var(--ink-muted)" }}>I&rsquo;m</span>
+          <select
+            value={loading ? "" : (participantId ?? "")}
+            onChange={(e) => setParticipantId(e.target.value || null)}
+            disabled={loading}
+            style={{
+              minHeight: 44,
+              padding: "10px 12px",
+              borderRadius: 6,
+              border: "1px solid var(--ink-muted)",
+              background: "var(--bg)",
+              color: "var(--ink)",
+              fontSize: 16,
+              opacity: loading ? 0.8 : 1,
+            }}
+            aria-label="Who is using the app"
+            aria-busy={loading}
+          >
+            <option value="">{loading ? "Loading…" : "New User"}</option>
+            {!loading &&
+              (() => {
                 const seenLabels = new Set<string>();
                 return participants
                   .filter((p) => {
@@ -70,9 +73,8 @@ export default function AppNav() {
                     </option>
                   ));
               })()}
-            </select>
-          </label>
-        )}
+          </select>
+        </label>
         <Link href="/talk/session">My Memories</Link>
         <Link href="/bank">Shared Memories</Link>
         <button

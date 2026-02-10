@@ -77,8 +77,15 @@ export function ParticipantProvider({ children }: { children: React.ReactNode })
   }, [applyParticipants]);
 
   useEffect(() => {
+    let cancelled = false;
+    const timeoutMs = 12000;
+    const timeoutId = setTimeout(() => {
+      if (cancelled) return;
+      setLoading(false);
+    }, timeoutMs);
     apiGet<Participant[]>("/voice/participants")
       .then((list) => {
+        if (cancelled) return;
         applyParticipants(list);
         const stored = typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
         const unique = list.filter((p, i, arr) => arr.findIndex((x) => x.id === p.id) === i);
@@ -89,8 +96,17 @@ export function ParticipantProvider({ children }: { children: React.ReactNode })
           else localStorage.removeItem(STORAGE_KEY);
         }
       })
-      .catch(() => setParticipants([]))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (!cancelled) setParticipants([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+        clearTimeout(timeoutId);
+      });
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
   }, [applyParticipants]);
 
   const setParticipantId = useCallback((id: string | null) => {
