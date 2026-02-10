@@ -951,6 +951,7 @@ class SharedStoryOut(BaseModel):
     id: str  # moment_id for playback
     title: str | None
     summary: str | None
+    participant_id: str | None  # author; None if legacy
     participant_name: str
     created_at: str
     has_audio: bool
@@ -971,6 +972,7 @@ def list_shared_stories(
             models.Moment.family_id == DEFAULT_FAMILY_ID,
             models.Moment.source == "voice_story",
             models.Moment.shared_at.isnot(None),
+            models.Moment.deleted_at.is_(None),
         )
         .order_by(models.Moment.created_at.desc())
         .limit(limit * 2 if new_only and participant_id else limit)
@@ -1023,6 +1025,7 @@ def list_shared_stories(
                 id=mid,
                 title=(m.title or "").strip() or None,
                 summary=(m.summary or "").strip() or None,
+                participant_id=str(m.participant_id) if m.participant_id else None,
                 participant_name=participants.get(str(m.participant_id or ""), "Someone"),
                 created_at=m.created_at.isoformat() if m.created_at else "",
                 has_audio=mid in has_audio_set,
@@ -1083,6 +1086,60 @@ def mark_shared_story_listened(body: MarkListenedBody, db: Session = Depends(get
         )
         db.commit()
     return {"listened": True}
+
+
+class DeleteSharedStoryBody(BaseModel):
+    """Author must send their participant_id and recall code to delete their shared story."""
+    participant_id: str
+    code: str  # 4-digit recall PIN
+
+
+@router.post("/stories/shared/{moment_id}/delete")
+def delete_shared_story(
+    moment_id: str,
+    body: DeleteSharedStoryBody,
+    db: Session = Depends(get_db),
+):
+    """Delete a shared story. Only the author can delete; requires their recall pass code."""
+    moment = (
+        db.query(models.Moment)
+        .filter(
+            models.Moment.id == moment_id,
+            models.Moment.family_id == DEFAULT_FAMILY_ID,
+            models.Moment.source == "voice_story",
+            models.Moment.shared_at.isnot(None),
+            models.Moment.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if not moment:
+        raise HTTPException(status_code=404, detail="Shared story not found.")
+    if str(moment.participant_id or "") != (body.participant_id or "").strip():
+        raise HTTPException(status_code=403, detail="Only the author can delete this story.")
+    participant = (
+        db.query(models.VoiceParticipant)
+        .filter(
+            models.VoiceParticipant.id == body.participant_id,
+            models.VoiceParticipant.family_id == DEFAULT_FAMILY_ID,
+        )
+        .first()
+    )
+    if not participant:
+        raise HTTPException(status_code=404, detail="Participant not found.")
+    stored = (getattr(participant, "recall_passphrase", None) or "").strip()
+    if not stored or len(stored) != 64:
+        raise HTTPException(status_code=400, detail="No recall code set for this participant.")
+    raw = (body.code or "").strip()
+    if not RECALL_PIN_PATTERN.match(raw):
+        raise HTTPException(status_code=400, detail="Code must be exactly 4 digits.")
+    pid = (body.participant_id or "").strip()
+    if _hash_recall_pin(pid, raw) != stored:
+        raise HTTPException(status_code=401, detail="Incorrect pass code.")
+    moment.deleted_at = datetime.now(timezone.utc)
+    db.add(moment)
+    db.commit()
+    logger.info("voice/stories: deleted shared story moment_id=%s participant_id=%s", moment_id, body.participant_id)
+    return {"deleted": True}
 
 
 # OpenAI TTS: same voice as realtime agent (alloy) for Narrate Story

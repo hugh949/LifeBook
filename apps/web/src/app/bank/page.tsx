@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { API_BASE, apiGet, apiPatch } from "@/lib/api";
+import { API_BASE, apiGet, apiPatch, apiPost } from "@/lib/api";
+import { useParticipantIdentity } from "../components/ParticipantIdentity";
 import { requestUploadUrl, completeUpload } from "@/lib/media";
 
 type Moment = {
@@ -18,6 +19,7 @@ type SharedStory = {
   id: string;
   title: string | null;
   summary: string | null;
+  participant_id?: string | null;
   participant_name: string;
   created_at: string;
   has_audio: boolean;
@@ -78,9 +80,15 @@ function isStubMediaUrl(url: string | null | undefined): boolean {
 }
 
 export default function BankPage() {
+  const { participantId } = useParticipantIdentity();
   const [moments, setMoments] = useState<Moment[]>([]);
   const [sharedStories, setSharedStories] = useState<SharedStory[]>([]);
   const [loading, setLoading] = useState(true);
+  /** When set, show recall-code prompt to delete this shared story (author only). */
+  const [deleteStoryId, setDeleteStoryId] = useState<string | null>(null);
+  const [deleteCode, setDeleteCode] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteSending, setDeleteSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** When set, this voice story is playing in place; value is the playback URL. */
   const [playingMomentId, setPlayingMomentId] = useState<string | null>(null);
@@ -460,6 +468,7 @@ export default function BankPage() {
               id: m.id,
               title: m.title ?? null,
               summary: m.summary ?? null,
+              participant_id: null,
               participant_name: "Someone",
               created_at: m.created_at ?? "",
               has_audio: true,
@@ -555,7 +564,98 @@ export default function BankPage() {
                         >
                           Give Reaction
                         </button>
+                        {participantId && s.participant_id && s.participant_id === participantId && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ fontSize: 12, padding: "6px 10px", color: "var(--error)" }}
+                            onClick={() => {
+                              setDeleteStoryId(s.id);
+                              setDeleteCode("");
+                              setDeleteError(null);
+                            }}
+                            aria-label="Delete this story (author only)"
+                          >
+                            Delete story
+                          </button>
+                        )}
                       </div>
+                      {deleteStoryId === s.id && (
+                        <div style={{ marginTop: 12, marginLeft: 36, padding: 12, background: "var(--bg)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
+                          <p style={{ margin: "0 0 8px", fontSize: 13, color: "var(--ink)" }}>
+                            Enter your 4-digit recall code to delete this story.
+                          </p>
+                          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+                            <input
+                              type="password"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              maxLength={4}
+                              value={deleteCode}
+                              onChange={(e) => {
+                                const v = e.target.value.replace(/\D/g, "").slice(0, 4);
+                                setDeleteCode(v);
+                                setDeleteError(null);
+                              }}
+                              placeholder="••••"
+                              disabled={deleteSending}
+                              style={{
+                                width: 80,
+                                padding: "8px 10px",
+                                borderRadius: "var(--radius-sm)",
+                                border: "1px solid var(--border)",
+                                fontFamily: "inherit",
+                                fontSize: 16,
+                                letterSpacing: 4,
+                              }}
+                              aria-label="Recall pass code (4 digits)"
+                            />
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              style={{ fontSize: 13 }}
+                              disabled={deleteSending || deleteCode.length !== 4}
+                              onClick={async () => {
+                                if (!participantId || deleteCode.length !== 4) return;
+                                setDeleteSending(true);
+                                setDeleteError(null);
+                                try {
+                                  await apiPost<{ deleted: boolean }>(`/voice/stories/shared/${s.id}/delete`, {
+                                    participant_id: participantId,
+                                    code: deleteCode,
+                                  });
+                                  setDeleteStoryId(null);
+                                  setDeleteCode("");
+                                  apiGet<SharedStory[]>("/voice/stories/shared").then(setSharedStories).catch(() => {});
+                                } catch (err) {
+                                  const msg = err instanceof Error ? err.message : "Delete failed.";
+                                  setDeleteError(msg.includes("Incorrect") ? "Incorrect pass code. Use the same 4-digit code you use to unlock your recall stories in Talk." : msg);
+                                } finally {
+                                  setDeleteSending(false);
+                                }
+                              }}
+                            >
+                              {deleteSending ? "Deleting…" : "Confirm delete"}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ fontSize: 13 }}
+                              onClick={() => {
+                                setDeleteStoryId(null);
+                                setDeleteCode("");
+                                setDeleteError(null);
+                              }}
+                              disabled={deleteSending}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                          {deleteError && (
+                            <p role="alert" style={{ color: "var(--error)", fontSize: 12, margin: "8px 0 0" }}>{deleteError}</p>
+                          )}
+                        </div>
+                      )}
                       {playingMomentId === s.id && playingUrl && !isExpanded && (
                         <audio
                           data-moment-id={s.id}
