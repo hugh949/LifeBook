@@ -198,6 +198,28 @@ Manage and inspect the LifeBook API Container App via Azure CLI (no Portal neede
 
 ---
 
+## troubleshoot-prod-backend.sh
+
+Deep troubleshooting for production: why the backend (Container App) or database might not be responding. Runs seven checks and suggests next steps.
+
+**Usage:**
+```bash
+# From repo root (uses default PROD_WEB_URL)
+./scripts/troubleshoot-prod-backend.sh
+
+# With Web App URL and optional DB check
+PROD_WEB_URL=https://app-lifebook-web-v1.azurewebsites.net ./scripts/troubleshoot-prod-backend.sh
+DATABASE_URL='postgresql://...' ./scripts/troubleshoot-prod-backend.sh
+```
+
+**Checks:** (1) Web App proxy and API_UPSTREAM, (2) GET /api/health via proxy, (3) GET /health on Container App directly, (4) Revisions and traffic, (5) Container App system log (exit 255, probe failed), (6) Database connectivity from this machine (if DATABASE_URL set; uses psql or Python/psycopg), (7) Postgres firewall rules (if `az` and server name available).
+
+**Requirements:** `curl`. For full checks: Azure CLI (`az login`), and optionally `DATABASE_URL` and `psql` or repo `uv` for DB test.
+
+**Overrides:** `PROD_WEB_URL`, `AZURE_RESOURCE_GROUP`, `AZURE_CONTAINER_APP`, `AZURE_WEBAPP_NAME`, `PG_SERVER_NAME`.
+
+---
+
 ## azure-storage-cors.sh
 
 Set CORS on the Azure Storage Account (Blob service) so the browser can load photos/audio from blob URLs. Run **once** per storage account (or when you add a new Web App origin).

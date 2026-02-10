@@ -53,6 +53,8 @@ Use your storage account name and key (same as in GitHub Secrets). The script al
 - **Password:** If the password contains `@` or `%`, URL-encode it (`@` → `%40`, `%` → `%25`) in the URL.
 - PostgreSQL firewall must allow the Container App (or “Allow Azure services”).
 
+- **Azure Postgres (TLS):** Azure Flexible Server enforces TLS by default. The API and `wait_for_db` add `?sslmode=require` automatically when the URL does not already include `sslmode`. For production (GitHub Secrets) use a URL without `sslmode` or with `sslmode=require`.
+
 ## 5. See the real error
 
 After the latest deploy (with improved error responses), trigger the failing request again and check:
@@ -76,6 +78,29 @@ If you still get 500s after setting `API_UPSTREAM` on the Web App, the Web App m
 
 3. **Set API_UPSTREAM again after deploy (optional):** The deploy workflow sets it automatically. To set manually:  
    `./scripts/set-webapp-api-upstream.sh`
+
+## 7a. Container App accepts connection but /health never responds (timeout)
+
+If `curl` to the Container App URL (e.g. `https://aca-lifebook-api-v1....azurecontainerapps.io/health`) connects (TLS OK) but no HTTP response comes back (or times out), the app inside the container is not responding. The container runs **wait_for_db** → **alembic upgrade head** → **uvicorn**. If it never reaches uvicorn, requests hang.
+
+**Most likely cause: the container cannot reach the database.** `wait_for_db` tries 30 times then exits with code 1, so the container process exits. Azure may report this as **exit code 255** and **"Probe of StartUp failed with status code: 1"** in System log—the process is already exiting before the app listens.
+
+**What to do:**
+
+1. **PostgreSQL firewall (do this first):** In Azure, open your **PostgreSQL Flexible Server** → **Networking** (or **Settings → Firewall**). Ensure either:
+   - **Allow public access from any Azure service within Azure to this server** is **Yes**, or  
+   - You add a firewall rule that allows the Container App’s outbound IP (or the Azure Container Apps egress range for your region).  
+   Without this, the container cannot connect to the DB, `wait_for_db` fails, the process exits (255), and the container restarts in a loop.
+
+2. **Container App → System log** (Monitoring → Log stream → choose "System log"). You may see:
+   - `Container 'aca-lifebook-api-v1' was terminated with exit code '255' and reason 'ProcessExited'` → process exited (usually DB unreachable).
+   - `Probe of StartUp failed with status code: 1` → startup probe failed (often because the process already exited).
+
+3. **Revisions:** Container App → **Revisions and replicas**. Confirm 100% traffic is on the **latest** revision.
+
+4. **TLS/SSL:** Azure Postgres enforces TLS by default. The startup script `wait_for_db` now adds `?sslmode=require` to Postgres URLs that don’t already have `sslmode`, so the container uses SSL. If the firewall is already open and the container still exits, ensure your `DATABASE_URL` in GitHub Secrets does not use `sslmode=disable` (use no sslmode or `sslmode=require`).
+
+5. After fixing the Postgres firewall (and TLS if needed), redeploy the API (Actions → Deploy API) or wait for the next revision; the container should then pass `wait_for_db`, run migrations, start uvicorn, and respond to `/health`.
 
 ## 8. API proxy error: fetch failed
 

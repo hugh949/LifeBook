@@ -61,6 +61,52 @@ export async function apiPost<T>(path: string, body: unknown, init?: RequestInit
   return res.json() as Promise<T>;
 }
 
+export async function apiGetWithTimeout<T>(path: string, timeoutMs: number, init?: RequestInit): Promise<T> {
+  const url = `${API_BASE}${path}`;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, cache: "no-store", signal: controller.signal });
+    if (!res.ok) {
+      const { msg, body } = await parseErrorResponse(res);
+      logApiError("GET", path, res.status, url, body, msg);
+      throw new Error(msg || `GET ${path} failed: ${res.status}`);
+    }
+    return res.json() as Promise<T>;
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") throw new Error("Request timed out");
+    throw e;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+export async function apiPostWithTimeout<T>(path: string, body: unknown, timeoutMs: number, init?: RequestInit): Promise<T> {
+  const url = `${API_BASE}${path}`;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+      body: JSON.stringify(body),
+      ...init,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const { msg, body: resBody } = await parseErrorResponse(res);
+      logApiError("POST", path, res.status, url, resBody, msg);
+      throw new Error(msg || `POST ${path} failed: ${res.status}`);
+    }
+    return res.json() as Promise<T>;
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") throw new Error("Request timed out");
+    throw e;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 export async function apiPatch<T>(path: string, body: unknown, init?: RequestInit): Promise<T> {
   const url = `${API_BASE}${path}`;
   const res = await fetch(url, {

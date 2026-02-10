@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { getRealtimeToken, connectRealtimeWebRTC } from "@/lib/realtime";
-import { apiGet, apiPost, apiPatch, apiDelete, apiPostFormData } from "@/lib/api";
+import { apiGet, apiPost, apiPatch, apiDelete, apiPostFormData, apiGetWithTimeout, apiPostWithTimeout } from "@/lib/api";
 import { createWavRecorderRolling, recordWavForDuration, type WavRecorderRolling } from "@/lib/wavRecorder";
 import { useParticipantIdentity } from "@/app/components/ParticipantIdentity";
 
@@ -413,12 +413,15 @@ export default function SessionPage() {
                 try {
                   const params = JSON.parse(raw || "{}") as { name?: string };
                   const name = (params?.name ?? "").trim() || "Someone";
-                  const created = await apiPost<{ id: string; label: string }>("/voice/participants", {
-                    label: name,
-                  });
+                  const created = await apiPostWithTimeout<{ id: string; label: string }>(
+                    "/voice/participants",
+                    { label: name },
+                    30000
+                  );
                   setParticipantId(created.id);
                   setContextParticipantId(created.id);
                   refreshParticipants(created.id);
+                  participantIdRef.current = created.id;
                   const wavRec = enrollmentWavRecorderRef.current;
                   const enrollBlob = wavRec?.getWavBlob();
                   if (enrollBlob) {
@@ -432,10 +435,12 @@ export default function SessionPage() {
                   sendToolOutput(
                     JSON.stringify({ participant_id: created.id, label: created.label, result: "created" })
                   );
+                  triggerResponse();
                 } catch (err) {
                   sendToolOutput(
                     JSON.stringify({ error: err instanceof Error ? err.message : "Could not create participant" })
                   );
+                  triggerResponse();
                 }
                 continue;
               }
@@ -447,6 +452,7 @@ export default function SessionPage() {
                   const sourceMomentId = sessionMomentIdRef.current;
                   if (!pid || !storyText) {
                     sendToolOutput(JSON.stringify({ error: "participant_id and story_text are required" }));
+                    triggerResponse();
                     continue;
                   }
                   const body: { participant_id: string; story_text: string; source_moment_id?: string } = {
@@ -454,7 +460,11 @@ export default function SessionPage() {
                     story_text: storyText,
                   };
                   if (sourceMomentId) body.source_moment_id = sourceMomentId;
-                  const created = await apiPost<{ id: string; title: string | null }>("/voice/stories/confirm", body);
+                  const created = await apiPostWithTimeout<{ id: string; title: string | null }>(
+                    "/voice/stories/confirm",
+                    body,
+                    30000
+                  );
                   refreshParticipants(pid);
                   apiGet<VoiceStory[]>(`/voice/stories?participant_id=${encodeURIComponent(pid)}`)
                     .then(setStoryList)
@@ -481,7 +491,10 @@ export default function SessionPage() {
                   const momentId = params?.moment_id;
                   if (momentId) {
                     const currentParticipantId = participantIdRef.current;
-                    apiGet<{ url: string }>(`/voice/stories/shared/playback?moment_id=${encodeURIComponent(momentId)}`)
+                    apiGetWithTimeout<{ url: string }>(
+                      `/voice/stories/shared/playback?moment_id=${encodeURIComponent(momentId)}`,
+                      30000
+                    )
                       .then(({ url }) => {
                         const storyEl = storyPlaybackRef.current ?? document.createElement("audio");
                         if (!storyPlaybackRef.current) {
@@ -495,8 +508,12 @@ export default function SessionPage() {
                           apiPost("/voice/stories/shared/listened", { participant_id: currentParticipantId, moment_id: momentId }).catch(() => {});
                         }
                         sendToolOutput(JSON.stringify({ result: "played" }));
+                        triggerResponse();
                       })
-                      .catch(() => sendToolOutput(JSON.stringify({ error: "Playback failed" })));
+                      .catch(() => {
+                        sendToolOutput(JSON.stringify({ error: "Playback failed" }));
+                        triggerResponse();
+                      });
                   }
                 } catch {
                   // ignore parse error

@@ -12,9 +12,9 @@ API_HEALTH="$BASE/api/health"
 ok=0
 
 echo "→ GET $PROXY_PING"
-code=$(curl -s -o /tmp/verify-prod-proxy.json -w "%{http_code}" "$PROXY_PING")
+code=$(curl -s --max-time 30 -o /tmp/verify-prod-proxy.json -w "%{http_code}" "$PROXY_PING") || code="000"
 if [[ "$code" != "200" ]]; then
-  echo "  FAIL: expected 200, got $code"
+  echo "  FAIL: expected 200, got $code (timeout or connection error if 000)"
   ok=1
 else
   if grep -q '"proxy"[[:space:]]*:[[:space:]]*true' /tmp/verify-prod-proxy.json 2>/dev/null; then
@@ -26,9 +26,9 @@ else
 fi
 
 echo "→ GET $API_HEALTH"
-code=$(curl -s -o /tmp/verify-prod-health.json -w "%{http_code}" "$API_HEALTH")
+code=$(curl -s --max-time 30 -o /tmp/verify-prod-health.json -w "%{http_code}" "$API_HEALTH") || code="000"
 if [[ "$code" != "200" ]]; then
-  echo "  FAIL: expected 200, got $code"
+  echo "  FAIL: expected 200, got $code (timeout or connection error if 000)"
   ok=1
 else
   echo "  OK (200)"
