@@ -60,19 +60,27 @@ echo "Pushing to origin main..."
 git push -u origin main
 
 echo ""
-echo -e "${GREEN}Push done. GitHub Actions will run 'Deploy All (Web + API)'.${NC}"
+echo -e "${GREEN}Push done.${NC}"
 echo ""
-echo "Watch the workflow:"
-echo "  $(git remote get-url origin | sed 's/\.git$//')/actions"
+echo "Deploy is manual: pushing does NOT start the workflow."
+echo "Trigger deploy now so your code actually goes to production:"
 echo ""
 
-# If GitHub CLI is installed, show latest run
 if command -v gh >/dev/null 2>&1; then
-  echo "Latest run:"
-  gh run list --workflow=deploy-all.yml --limit 1 2>/dev/null || true
+  gh workflow run deploy-all.yml
+  echo -e "${GREEN}Deploy All workflow started.${NC}"
+  echo "Watch: $(git remote get-url origin | sed 's/\.git$//')/actions"
   echo ""
-  echo "To run deploy without pushing (manual trigger):"
-  echo "  gh workflow run deploy-all.yml"
+  echo "After it turns green, verify production:"
+  echo "  PROD_WEB_URL=https://app-lifebook-web-v1.azurewebsites.net ./scripts/verify-prod.sh"
+else
+  echo "  1. Open: $(git remote get-url origin | sed 's/\.git$//')/actions"
+  echo "  2. Select 'Deploy All (Web + API)' → Run workflow → Run workflow"
+  echo "  Or install GitHub CLI (gh) and run: gh workflow run deploy-all.yml"
+  echo ""
+  echo "After deploy, verify:"
+  echo "  PROD_WEB_URL=https://app-lifebook-web-v1.azurewebsites.net ./scripts/verify-prod.sh"
 fi
-
+echo ""
+echo "Tip: Use ./scripts/release.sh to bump version, commit, push, and trigger deploy in one go."
 echo "Done."

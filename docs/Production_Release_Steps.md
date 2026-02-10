@@ -4,17 +4,19 @@ Use this when you have **GitHub secrets and variables already set** and want to 
 
 **Assumptions:** You are on the LifeBook repo, Azure resources exist (Web App, Container App, Postgres, Storage), and all keys from `.env` are in GitHub Actions secrets.
 
+**Recommended:** For normal releases, use **`./scripts/release.sh`** (see **docs/Release_Process.md**). It bumps the app version, commits, pushes, and triggers Deploy All so production shows the same version you tested locally. The steps below are the full first-time or migration-including flow.
+
 **Scripts and actions in order:**
 
 | Step | What to run / do |
 |------|-------------------|
 | 1 | `export DATABASE_URL='postgresql+psycopg://...'` (production URL; required locally for migrations + wipe—GitHub secret is only for the deploy workflow) |
 | 2 | (This release) Back up production DB (optional but recommended). |
-| 3 | `cd services/api && uv run alembic upgrade head` (create/update schema; **do this before wipe** if the DB is new or old) |
+| 3 | `./scripts/prod-migrations.sh` (or `cd services/api && uv run alembic upgrade head`) — create/update schema; **do this before wipe** if the DB is new or old. |
 | 4 | (This release, optional) `cd services/api && uv run python scripts/wipe_all_participants_and_data.py --confirm` — only after migrations; skip if DB is already empty. |
-| 5 | `./scripts/deploy-to-azure.sh` (from repo root) |
-| 6 | **Actions → Deploy All (Web + API) → Run workflow** (or `gh workflow run deploy-all.yml`) |
-| 7 | `PROD_WEB_URL=https://app-lifebook-web-v1.azurewebsites.net ./scripts/verify-prod.sh` |
+| 5 | `./scripts/release.sh` (version bump, commit, push, trigger Deploy All) or `./scripts/deploy-to-azure.sh` then manually trigger Deploy All. |
+| 6 | Wait for **Deploy All (Web + API)** to finish in GitHub Actions (script triggers it if `gh` is installed). |
+| 7 | `PROD_WEB_URL=https://app-lifebook-web-v1.azurewebsites.net ./scripts/verify-prod.sh` — optionally `EXPECTED_VERSION=x.y` to confirm deployed version. |
 
 ---
 
@@ -147,14 +149,12 @@ Once you’ve done the full flow once, later releases are usually:
 
 1. **No wipe.** Set `DATABASE_URL` to production only if you need to run new migrations.
 2. **Migrations (if you added any):**  
-   `cd services/api && uv run alembic upgrade head`  
-   (with `DATABASE_URL` set to production.)
-3. **Push:**  
-   `./scripts/deploy-to-azure.sh`
-4. **Deploy:**  
-   Actions → **Deploy All (Web + API)** → **Run workflow** (or `gh workflow run deploy-all.yml`).
-5. **Verify:**  
-   `PROD_WEB_URL=https://app-lifebook-web-v1.azurewebsites.net ./scripts/verify-prod.sh`
+   `DATABASE_URL='...' ./scripts/prod-migrations.sh`
+3. **Release:**  
+   `./scripts/release.sh` (bump version, commit, push, trigger Deploy All).
+4. **Verify:**  
+   `PROD_WEB_URL=https://app-lifebook-web-v1.azurewebsites.net ./scripts/verify-prod.sh`  
+   Optional: `EXPECTED_VERSION=1.1 ... ./scripts/verify-prod.sh` to confirm version.
 
 (Steps 2–4 in the main list—backup, migrations, wipe—apply to this major release; for future releases you only run migrations when there are new ones, then push and deploy.)
 

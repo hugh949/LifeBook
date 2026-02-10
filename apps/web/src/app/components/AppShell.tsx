@@ -1,6 +1,7 @@
 "use client";
 
 import AppNav from "./AppNav";
+import AppFooter from "./AppFooter";
 import { ParticipantProvider } from "./ParticipantIdentity";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -9,6 +10,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <div className="app-shell">
         <AppNav />
         <main className="app-main">{children}</main>
+        <AppFooter />
       </div>
     </ParticipantProvider>
   );

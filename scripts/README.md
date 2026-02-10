@@ -1,5 +1,9 @@
 # Scripts
 
+**Release to production (recommended):** See **docs/Release_Process.md** for the full flow. Use **`./scripts/release.sh`** to bump version, commit, push, and trigger Deploy All so production matches the version you tested locally.
+
+---
+
 ## deploy-to-github.sh
 
 Push LifeBook to GitHub first (commit if needed, then push to `main`).
@@ -26,9 +30,8 @@ Deploy LifeBook to Azure via GitHub Actions.
 **What it does:**
 - Runs from the repo root (or from `scripts/`).
 - If you have uncommitted changes, offers to commit them.
-- Pushes `main` to `origin`, which triggers the **Deploy All (Web + API)** workflow on GitHub.
-- Prints the link to your repo’s Actions page so you can watch the run.
-- If `gh` (GitHub CLI) is installed, shows the latest workflow run and how to trigger deploy manually.
+- Pushes `main` to `origin`. Deploy does **not** run automatically on push; if `gh` is installed, the script then triggers **Deploy All (Web + API)** so your code actually deploys.
+- For versioned releases, use **`./scripts/release.sh`** instead (bump version, commit, push, trigger deploy).
 
 **Usage:**
 ```bash
@@ -44,13 +47,52 @@ bash scripts/deploy-to-azure.sh
 - Pushed to `main` (or the script will offer to push).
 - GitHub Actions secrets set for Azure (see **First_Time_Deploy.md**).
 
-**Manual workflow trigger (no push):**
+**Trigger deploy only (after push):**
 ```bash
-gh workflow run deploy-all.yml
-# Or only web or only API:
-gh workflow run deploy-web.yml
-gh workflow run deploy-api.yml
+./scripts/prod-deploy-all.sh    # Deploy All (Web + API)
+./scripts/prod-deploy-web.sh    # Web only
+./scripts/prod-deploy-api.sh    # API only
 ```
+
+---
+
+## release.sh
+
+**Preferred way to release to production.** Bump version (or keep current), commit, push, and trigger Deploy All.
+
+```bash
+./scripts/release.sh           # Prompts: deploy as-is, bump minor, or cancel
+./scripts/release.sh 1.2       # Set version to 1.2, commit, push, trigger deploy
+```
+
+Version is read and updated in `apps/web/src/app/version.ts`. After the workflow completes, verify with:
+```bash
+EXPECTED_VERSION=1.2 PROD_WEB_URL=https://app-lifebook-web-v1.azurewebsites.net ./scripts/verify-prod.sh
+```
+
+Full details: **docs/Release_Process.md**.
+
+---
+
+## verify-prod.sh
+
+Verify production web proxy and API health (and optionally deployed version).
+
+```bash
+PROD_WEB_URL=https://app-lifebook-web-v1.azurewebsites.net ./scripts/verify-prod.sh
+EXPECTED_VERSION=1.1 PROD_WEB_URL=... ./scripts/verify-prod.sh   # also check version
+```
+
+---
+
+## Local and production helpers
+
+| Script | Purpose |
+|--------|---------|
+| `run-local.sh` | Full stack locally: `docker compose up --build` (db + API + web). |
+| `local-api.sh` | DB + API only; run web with `npm run dev` in `apps/web` and `API_UPSTREAM=http://localhost:8000` in `.env.local`. |
+| `run-migrations.sh` | Run Alembic migrations locally (Docker; uses `.env` DATABASE_URL). |
+| `prod-migrations.sh` | Run migrations on **production** DB. Set `DATABASE_URL` to prod URL first. |
 
 ---
 

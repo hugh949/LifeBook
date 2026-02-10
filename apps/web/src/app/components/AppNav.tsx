@@ -1,19 +1,40 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useParticipantIdentity } from "./ParticipantIdentity";
+import { APP_VERSION } from "../version";
+import FeedbackModal from "./FeedbackModal";
 
 export default function AppNav() {
   const { participantId, participantLabel, participants, setParticipantId, loading } = useParticipantIdentity();
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   return (
     <nav className="app-nav">
-      <Link href="/" className="brand">
-        LifeBook
-      </Link>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <Link href="/talk/session">My Memories</Link>
-        <Link href="/bank">Shared Memories</Link>
+      <div className="app-nav-brand-row">
+        <Image
+          src="/xavor-logo.png"
+          alt="Xavor"
+          width={80}
+          height={32}
+          className="app-nav-logo"
+        />
+        <span className="app-nav-brand-version">
+          <Link href="/" className="brand">
+            LifeBook
+          </Link>{" "}
+          <span className="app-nav-version-tagline">
+            <span className="app-nav-version">v{APP_VERSION}</span>
+            <span className="app-nav-tagline">
+              AI App by Xavor Venture Studios for Crafting and Sharing Intergenerational Family Stories
+            </span>
+          </span>
+        </span>
+      </div>
+      <div className="app-nav-spacer" aria-hidden="true" />
+      <div className="app-nav-links">
         {!loading && (
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14 }}>
             <span style={{ color: "var(--ink-muted)" }}>I&rsquo;m</span>
@@ -21,12 +42,13 @@ export default function AppNav() {
               value={participantId ?? ""}
               onChange={(e) => setParticipantId(e.target.value || null)}
               style={{
-                padding: "4px 8px",
+                minHeight: 44,
+                padding: "10px 12px",
                 borderRadius: 6,
                 border: "1px solid var(--ink-muted)",
                 background: "var(--bg)",
                 color: "var(--ink)",
-                fontSize: 14,
+                fontSize: 16,
               }}
               aria-label="Who is using the app"
             >
@@ -51,7 +73,17 @@ export default function AppNav() {
             </select>
           </label>
         )}
+        <Link href="/talk/session">My Memories</Link>
+        <Link href="/bank">Shared Memories</Link>
+        <button
+          type="button"
+          className="app-nav-link-btn"
+          onClick={() => setFeedbackOpen(true)}
+        >
+          App Feedback
+        </button>
       </div>
+      <FeedbackModal open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </nav>
   );
 }

@@ -9,14 +9,22 @@ function logApiError(
   body: string,
   parsedMessage?: string
 ): void {
-  let detail = body.length > 500 ? body.slice(0, 500) + "..." : body;
-  if (!detail || detail.trim() === "" || detail.trim() === "{}") {
-    detail = "(empty)";
+  const message = parsedMessage ?? (body?.trim() || "(empty)");
+  const isUnreachable =
+    status === 502 &&
+    (message.includes("fetch failed") ||
+      message.includes("API proxy error") ||
+      message.includes("API_UPSTREAM"));
+  if (isUnreachable) {
+    console.warn(
+      "[LifeBook API] Backend unreachable. Start the API (e.g. docker compose up) or set API_UPSTREAM in .env.local / Web App settings."
+    );
+    return;
   }
-  const message = parsedMessage ?? detail;
+  const detail = body.length > 500 ? body.slice(0, 500) + "..." : body;
   console.error(
     `[LifeBook API] ${method} ${path} failed (${status}): ${message}`,
-    { status, url, responseBody: detail }
+    { status, url, responseBody: detail || "(empty)" }
   );
 }
 
