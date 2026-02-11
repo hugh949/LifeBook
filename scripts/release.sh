@@ -23,12 +23,12 @@ NC='\033[0m'
 log() { echo "[release] $*"; }
 log_step() { echo ""; echo -e "${BOLD}[release] $*${NC}"; }
 
-# Require explicit yes (y) or no (n). Re-prompt until we get one. Return 0 if yes, 1 if no.
+# All prompts use (y/n). Accept single letter y/n or yes/no. Return 0 if y, 1 if n.
 confirm_yn() {
   local prompt="$1"
   local reply
   while true; do
-    read -r -p "$prompt " reply
+    read -r -p "$prompt (y/n) " reply
     reply=$(echo "$reply" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
     if [[ "$reply" == "yes" || "$reply" == "y" ]]; then return 0; fi
     if [[ "$reply" == "no" || "$reply" == "n" ]]; then return 1; fi
@@ -36,8 +36,9 @@ confirm_yn() {
   done
 }
 
-# Legacy name for other steps that use longer prompts
-confirm_yes_no() { confirm_yn "$@"; }
+cancel_msg() {
+  log "Cancelled. Run ./scripts/release.sh again to start from the beginning."
+}
 
 # Show DATABASE_URL with password masked (user:***@host)
 mask_db_url() {
@@ -79,7 +80,7 @@ if [ -n "$(git status --porcelain)" ]; then
   log_step "Uncommitted changes detected"
   git status --short
   echo ""
-  if confirm_yes_no "Commit all changes now and continue with release? (yes/no)"; then
+  if confirm_yn "Commit all changes now and continue with release?"; then
     read -r -p "Enter commit message (or press Enter for 'Pre-release commit'): " msg
     msg="${msg:-Pre-release commit}"
     log "Running: git add -A && git commit -m \"$msg\""
@@ -87,7 +88,7 @@ if [ -n "$(git status --porcelain)" ]; then
     git commit -m "$msg"
     log "Committed. Continuing with release."
   else
-    log "Release cancelled. Commit when ready, then run ./scripts/release.sh again."
+    cancel_msg
     exit 0
   fi
 fi
@@ -106,7 +107,7 @@ log_step "Step 2/7: Production database (backup and migrations)"
 if [ -n "${DATABASE_URL:-}" ]; then
   echo "  Current DATABASE_URL: $(mask_db_url "$DATABASE_URL")"
   echo ""
-  if ! confirm_yn "Is this the correct production database? (y/n)"; then
+  if ! confirm_yn "Is this the correct production database?"; then
     read -r -p "Enter new DATABASE_URL (or press Enter to skip backup and migration): " new_url
     if [[ -z "${new_url// /}" ]]; then
       export DATABASE_URL=""
@@ -117,7 +118,7 @@ if [ -n "${DATABASE_URL:-}" ]; then
     fi
   fi
 else
-  if confirm_yn "DATABASE_URL is not set. Set it now for backup and migration? (y/n)"; then
+  if confirm_yn "DATABASE_URL is not set. Set it now for backup and migration?"; then
     read -r -p "Enter DATABASE_URL: " new_url
     if [[ -n "${new_url// /}" ]]; then
       export DATABASE_URL="$new_url"
@@ -132,13 +133,13 @@ fi
 if [ -n "${DATABASE_URL:-}" ]; then
   log_step "Backup: production database"
   log "Backup is recommended before deploy so you can restore if needed. Requires pg_dump (PostgreSQL client tools)."
-  if confirm_yn "Back up production database now? (y/n)"; then
+  if confirm_yn "Back up production database now?"; then
     if "$REPO_ROOT/scripts/backup-db.sh"; then
       log "Backup completed."
     else
       echo -e "${YELLOW}[release] Backup failed (e.g. pg_dump not found). Install PostgreSQL client tools or run backup manually.${NC}"
-      if ! confirm_yn "Continue with release without backup? (y/n)"; then
-        log "Release cancelled."
+      if ! confirm_yn "Continue with release without backup?"; then
+        cancel_msg
         exit 1
       fi
     fi
@@ -157,7 +158,7 @@ if [ -n "${DATABASE_URL:-}" ]; then
     echo "  Head revision (in code): $head_rev"
     echo ""
     log "Pending migrations will also run in the Deploy workflow; running now ensures DB is ready before new code goes live."
-    if confirm_yn "Run pending migrations on production database now? (y/n)"; then
+    if confirm_yn "Run pending migrations on production database now?"; then
       if "$REPO_ROOT/scripts/prod-migrations.sh"; then
         log "Migrations completed."
       else
@@ -193,8 +194,8 @@ if [ -n "$1" ]; then
     exit 1
   fi
   log "You specified version: $NEW_VERSION (current in file: $current_version)"
-  if ! confirm_yes_no "Proceed with version $NEW_VERSION for this release? (yes/no)"; then
-    log "Cancelled by user."
+  if ! confirm_yn "Proceed with version $NEW_VERSION for this release?"; then
+    cancel_msg
     exit 0
   fi
   if [ "$NEW_VERSION" != "$current_version" ]; then
@@ -236,7 +237,7 @@ else
       git add "$VERSION_FILE"
       ;;
     3)
-      log "Cancelled by user."
+      cancel_msg
       exit 0
       ;;
   esac
@@ -253,8 +254,8 @@ fi
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 if [ "$BRANCH" != "main" ]; then
   log_step "Not on main branch (current: $BRANCH)"
-  if ! confirm_yes_no "Merge $BRANCH into main and push from main? (yes/no)"; then
-    log "Cancelled. To release from main later: git checkout main && git merge $BRANCH && ./scripts/release.sh $NEW_VERSION"
+  if ! confirm_yn "Merge $BRANCH into main and push from main?"; then
+    cancel_msg
     exit 0
   fi
   log "Checking out main and merging $BRANCH..."
@@ -272,8 +273,8 @@ echo "  Branch to push:      $BRANCH"
 echo "  Remote:              $ORIGIN_URL"
 echo "  Action:               git push -u origin $BRANCH, then trigger workflow 'Deploy All (Web + API)'"
 echo ""
-if ! confirm_yes_no "Type 'yes' to push to origin $BRANCH and trigger the deploy workflow:"; then
-  log "Cancelled. No push or deploy."
+if ! confirm_yn "Push to origin $BRANCH and trigger the deploy workflow?"; then
+  cancel_msg
   exit 0
 fi
 
@@ -300,7 +301,7 @@ if command -v gh >/dev/null 2>&1; then
   ACTIONS_URL=$(git remote get-url origin 2>/dev/null | sed 's/\.git$//')/actions
   log "Workflow started. Watch: $ACTIONS_URL"
   echo ""
-  if confirm_yes_no "Wait for the workflow to finish and run verify-prod.sh? (yes/no)"; then
+  if confirm_yn "Wait for the workflow to finish and run verify-prod.sh?"; then
     log "Waiting for workflow to complete (~5–15 min)..."
     sleep 5
     RUN_ID=$(gh run list --workflow=deploy-all.yml --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)
