@@ -157,6 +157,7 @@ export default function BankPage() {
   const [narrateError, setNarrateError] = useState<string | null>(null);
   const narrateAudioRef = useRef<HTMLAudioElement | null>(null);
   const narrateUrlRef = useRef<string | null>(null);
+  const narrateBgmRef = useRef<HTMLAudioElement | null>(null);
   /** Shared Memories view: voice (default) | photos | videos */
   const [bankView, setBankView] = useState<"voice" | "photos" | "videos">("voice");
 
@@ -246,7 +247,7 @@ export default function BankPage() {
     }
   }
 
-  /** Narrate story using OpenAI TTS (same voice as voice agent). */
+  /** Narrate story using OpenAI TTS with synthetic AI-generated BGM (unique per story, cached). */
   async function narrateStory(story: SharedStory) {
     const text = (story.summary?.trim() || story.title?.trim() || "No content to read.").slice(0, 4096);
     if (!text.trim()) return;
@@ -254,15 +255,26 @@ export default function BankPage() {
     setNarrateError(null);
     setNarrateLoading(true);
     setNarratingMomentId(story.id);
+    const ttsBody = JSON.stringify({ text: text.trim() });
+    const bgmBody = JSON.stringify({ moment_id: story.id, text: text.trim() });
     try {
-      const res = await fetch(`${API_BASE}/voice/narrate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.trim() }),
-      });
-      if (!res.ok) {
-        const errBody = await res.text();
-        let msg = res.statusText;
+      // Fetch synthetic BGM and TTS in parallel (BGM may take 30-90s on first play)
+      const [bgmRes, narrateRes] = await Promise.all([
+        fetch(`${API_BASE}/voice/narrate/bgm`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: bgmBody,
+        }).then((r) => (r.ok ? r.json() : { url: null })).catch(() => ({ url: null })),
+        fetch(`${API_BASE}/voice/narrate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: ttsBody,
+        }),
+      ]);
+      const bgmUrl = bgmRes?.url && typeof bgmRes.url === "string" ? bgmRes.url.trim() : null;
+      if (!narrateRes.ok) {
+        const errBody = await narrateRes.text();
+        let msg = narrateRes.statusText;
         try {
           const j = JSON.parse(errBody);
           if (j.detail) msg = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
@@ -271,7 +283,7 @@ export default function BankPage() {
         }
         throw new Error(msg);
       }
-      const blob = await res.blob();
+      const blob = await narrateRes.blob();
       if (!blob.size) {
         throw new Error("No audio received. Try again.");
       }
@@ -288,6 +300,15 @@ export default function BankPage() {
         setNarratingMomentId(null);
         setNarrateError("Narration playback failed. Try again.");
       };
+      // Synthetic BGM when available (unique per story; ignore load/play failures)
+      if (bgmUrl) {
+        const bgm = new Audio(bgmUrl);
+        narrateBgmRef.current = bgm;
+        bgm.volume = 0.2;
+        bgm.loop = true;
+        bgm.onerror = () => {};
+        bgm.play().catch(() => {});
+      }
       await audio.play().catch((playErr) => {
         cleanupNarrate();
         setNarratingMomentId(null);
@@ -312,6 +333,12 @@ export default function BankPage() {
       audio.pause();
       audio.src = "";
       narrateAudioRef.current = null;
+    }
+    const bgm = narrateBgmRef.current;
+    if (bgm) {
+      bgm.pause();
+      bgm.src = "";
+      narrateBgmRef.current = null;
     }
   }
 
@@ -601,6 +628,8 @@ export default function BankPage() {
                           Give Reaction
                         </button>
                         {normalizedParticipantId && (() => {
+                          const isDeletable = sharedStoryIdSet(sharedStories).has(s.id);
+                          if (!isDeletable) return false;
                           const matchById = s.participant_id && (s.participant_id.trim().toLowerCase() === normalizedParticipantId.toLowerCase());
                           const matchByName = !s.participant_id && currentUserLabel && (s.participant_name?.trim() || "").toLowerCase() === currentUserLabel.toLowerCase();
                           return matchById || matchByName;
@@ -665,9 +694,16 @@ export default function BankPage() {
                                     participant_id: normalizedParticipantId,
                                     code: deleteCode,
                                   });
+                                  const deletedId = s.id;
                                   setDeleteStoryId(null);
                                   setDeleteCode("");
-                                  apiGet<SharedStory[]>("/voice/stories/shared").then(setSharedStories).catch(() => {});
+                                  setDeleteError(null);
+                                  // Remove from UI immediately so it disappears (don't wait for refetch)
+                                  setSharedStories((prev) => prev.filter((x) => x.id !== deletedId));
+                                  setMoments((prev) => prev.filter((m) => m.id !== deletedId));
+                                  if (expandedVoiceId === deletedId) setExpandedVoiceId(null);
+                                  if (playingMomentId === deletedId) setPlayingMomentId(null);
+                                  if (selectedMomentId === deletedId) setSelectedMomentId(null);
                                 } catch (err) {
                                   const msg = err instanceof Error ? err.message : "Delete failed.";
                                   setDeleteError(msg.includes("Incorrect") ? "Incorrect pass code. Use the same 4-digit code you use to unlock your recall stories in Talk." : msg);
@@ -724,16 +760,19 @@ export default function BankPage() {
                           <p style={{ margin: 0, fontSize: 13, color: "var(--ink-muted)" }}>No story text.</p>
                         )}
                       </section>
-                      {/* Narrate Story: OpenAI TTS (same voice as agent); optional original audio when has_audio */}
+                      {/* Narrate Story: synthetic BGM (unique per story) + OpenAI TTS (same voice as agent) */}
                       <section style={{ marginBottom: 16 }} aria-label="Narrate story">
                         <p style={{ margin: "0 0 6px", fontSize: 11, fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase" }}>Narrate Story</p>
-                        <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--ink-muted)" }}>
-                          Uses the same voice as the voice companion (OpenAI).
+                        <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--ink-muted)" }}>
+                          AI generates unique background music for this story and narrates with the same voice as the voice companion. First time may take a minute.
+                        </p>
+                        <p style={{ margin: "0 0 8px", fontSize: 11, color: "var(--ink-muted)", fontStyle: "italic" }}>
+                          OpenAI narrates; ElevenLabs adds the music.
                         </p>
                         {narrateLoading && narratingMomentId === s.id && expandedVoiceId === s.id && (
                           <p style={{ margin: "0 0 8px", fontSize: 13, color: "var(--ink)", display: "flex", alignItems: "center", gap: 8 }}>
                             <span style={{ width: 18, height: 18, border: "2px solid var(--border)", borderTopColor: "var(--ink)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} aria-hidden />
-                            Generating narration… You&apos;ll hear it in a moment.
+                            Preparing narration and unique music… You&apos;ll hear it in a moment.
                           </p>
                         )}
                         {narrateError && expandedVoiceId === s.id && (

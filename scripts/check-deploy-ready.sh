@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
-# Check that the repo is ready for a correct API deploy (delete route + workflow fix).
-# Run from repo root: ./scripts/check-deploy-ready.sh
-# This does NOT check GitHub Actions (we can't see that). It only checks local/committed files.
+# Pre-release check: ensures deploy config is correct and (with --require-clean) no uncommitted changes.
+# Run from repo root: ./scripts/check-deploy-ready.sh [--require-clean]
+#   --require-clean: fail if there are uncommitted changes (ensures everything is committed before deploy).
 
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+
+REQUIRE_CLEAN=0
+for arg in "$@"; do
+  if [ "$arg" = "--require-clean" ]; then REQUIRE_CLEAN=1; fi
+done
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -15,7 +20,7 @@ NC='\033[0m'
 
 ok=0
 
-echo "Checking repo state for API deploy (delete route)..."
+echo "Pre-release check (deploy config + repo state)..."
 echo ""
 
 # 1. Workflow: checkout must pin ref
@@ -50,26 +55,39 @@ else
   ok=1
 fi
 
-# 5. Uncommitted changes? (warning only; deploy will use last committed state)
+# 5. Uncommitted changes
 if ! git diff-index --quiet HEAD -- 2>/dev/null; then
-  echo -e "${YELLOW}!${NC} Uncommitted changes (commit and push before release if you want them in the next deploy)"
+  if [ "$REQUIRE_CLEAN" -eq 1 ]; then
+    echo -e "${RED}✗${NC} Uncommitted changes — commit everything first so it is deployed"
+    echo "  git add -A && git commit -m 'Your message'"
+    ok=1
+  else
+    echo -e "${YELLOW}!${NC} Uncommitted changes (commit before release so they are deployed)"
+  fi
 else
   echo -e "${GREEN}✓${NC} No uncommitted changes"
 fi
 
+# 6. Verify script exists
+if [ ! -f "$REPO_ROOT/scripts/verify-prod.sh" ]; then
+  echo -e "${RED}✗${NC} scripts/verify-prod.sh not found"
+  ok=1
+else
+  echo -e "${GREEN}✓${NC} scripts/verify-prod.sh present"
+fi
+
+# 7. Deploy workflows exist
+if [ ! -f "$REPO_ROOT/.github/workflows/deploy-all.yml" ]; then
+  echo -e "${RED}✗${NC} .github/workflows/deploy-all.yml not found"
+  ok=1
+else
+  echo -e "${GREEN}✓${NC} Deploy workflows present"
+fi
+
 echo ""
 if [ "$ok" -eq 0 ]; then
-  echo -e "${GREEN}Repo is ready.${NC} When you run ./scripts/release.sh (or trigger Deploy All), the API job will:"
-  echo "  - Check out the commit that triggered the run"
-  echo "  - Verify the delete route is in source, then build and deploy"
-  echo ""
-  echo "If production still returns 404 for the delete route after a deploy:"
-  echo "  1. Open GitHub → your repo → Actions"
-  echo "  2. Open the latest 'Deploy All (Web + API)' run"
-  echo "  3. Open the 'Deploy API' job"
-  echo "  4. Check: did 'Verify API source (delete route)' pass? Did 'Deploy to Container Apps' succeed?"
-  echo "  5. If the API job failed or was cancelled, fix the error and run release (or Deploy All) again."
+  echo -e "${GREEN}Pre-release check passed.${NC} Safe to run ./scripts/release.sh"
 else
-  echo -e "${RED}Some checks failed. Fix the items above before deploying.${NC}"
+  echo -e "${RED}Pre-release check failed. Fix the items above before deploying.${NC}"
   exit 1
 fi

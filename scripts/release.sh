@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Release LifeBook to production: set version, commit, push, trigger Deploy All.
+# Release LifeBook to production: verify → set version → commit → push → deploy → verify.
+# Ensures all local changes are committed so nothing is left out of production.
 # Production will show the version from apps/web/src/app/version.ts.
 # Usage: ./scripts/release.sh [version]
 #   With no arg: prompts to keep current version or bump minor (e.g. 1.0 → 1.1).
@@ -28,6 +29,20 @@ if ! git remote get-url origin >/dev/null 2>&1; then
   exit 1
 fi
 
+# Step 1: Pre-release check (deploy config + require clean working tree)
+# Require all changes committed so production never misses code that worked locally.
+echo ""
+echo "Step 1: Pre-release check (clean repo required)..."
+if ! "$REPO_ROOT/scripts/check-deploy-ready.sh" --require-clean; then
+  echo ""
+  echo -e "${RED}Fix the issues above, then run ./scripts/release.sh again.${NC}"
+  echo "  To commit everything: git add -A && git commit -m 'Your message'"
+  exit 1
+fi
+echo ""
+
+# Step 2: Version
+echo "Step 2: Version & commit..."
 # Read current version from version.ts
 current_version=""
 if [ -f "$VERSION_FILE" ]; then
@@ -76,23 +91,10 @@ else
   esac
 fi
 
-# If we bumped and have other uncommitted changes, add everything for one release commit
-if ! git diff-index --quiet HEAD -- 2>/dev/null; then
-  echo ""
-  git status --short
-  read -p "Commit all changes and deploy as Release $NEW_VERSION? (y/n) " -n 1 -r
-  echo
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Commit cancelled. Version file may have been updated; restore if needed."
-    exit 0
-  fi
-  git add -A
+# Working tree is already clean (enforced by check-deploy-ready --require-clean).
+# Commit only if we have staged changes (e.g. version bump).
+if ! git diff --cached --quiet 2>/dev/null; then
   git commit -m "Release $NEW_VERSION"
-else
-  # No other changes: commit if we bumped (version file already staged in choice 2)
-  if ! git diff --cached --quiet 2>/dev/null; then
-    git commit -m "Release $NEW_VERSION"
-  fi
 fi
 
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
@@ -113,16 +115,39 @@ git push -u origin main
 
 echo ""
 echo -e "${GREEN}Push complete. Triggering Deploy All (Web + API)...${NC}"
+PROD_WEB_URL="${PROD_WEB_URL:-https://app-lifebook-web-v1.azurewebsites.net}"
 if command -v gh >/dev/null 2>&1; then
   gh workflow run deploy-all.yml
   echo ""
   echo "Workflow started. Watch: $(git remote get-url origin | sed 's/\.git$//')/actions"
   echo ""
-  echo "After the workflow turns green (~5–15 min), verify production:"
-  echo "  PROD_WEB_URL=https://app-lifebook-web-v1.azurewebsites.net ./scripts/verify-prod.sh"
-  echo ""
-  echo "Optional: verify deployed version matches $NEW_VERSION:"
-  echo "  EXPECTED_VERSION=$NEW_VERSION PROD_WEB_URL=https://app-lifebook-web-v1.azurewebsites.net ./scripts/verify-prod.sh"
+  read -p "Wait for deploy and run verification? (y/n) " -n 1 -r
+  echo
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo ""
+    echo "Waiting for workflow to complete (~5–15 min)..."
+    sleep 5
+    RUN_ID=$(gh run list --workflow=deploy-all.yml --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)
+    if [ -n "$RUN_ID" ]; then
+      gh run watch "$RUN_ID" || true
+    fi
+    echo ""
+    echo "Step 3: Verifying production..."
+    if PROD_WEB_URL="$PROD_WEB_URL" EXPECTED_VERSION="$NEW_VERSION" "$REPO_ROOT/scripts/verify-prod.sh"; then
+      echo ""
+      echo -e "${GREEN}Verification passed. Production is live with version $NEW_VERSION.${NC}"
+    else
+      echo ""
+      echo -e "${YELLOW}Verification had issues. Check the output above and Azure/GitHub if needed.${NC}"
+    fi
+  else
+    echo ""
+    echo "After the workflow turns green (~5–15 min), verify production:"
+    echo "  PROD_WEB_URL=$PROD_WEB_URL ./scripts/verify-prod.sh"
+    echo ""
+    echo "To verify deployed version matches $NEW_VERSION:"
+    echo "  EXPECTED_VERSION=$NEW_VERSION PROD_WEB_URL=$PROD_WEB_URL ./scripts/verify-prod.sh"
+  fi
 else
   echo -e "${YELLOW}GitHub CLI (gh) not found. Trigger the workflow manually:${NC}"
   echo "  1. Open your repo on GitHub → Actions"
@@ -130,7 +155,7 @@ else
   echo "  Or install gh and run: gh workflow run deploy-all.yml"
   echo ""
   echo "After deploy, verify:"
-  echo "  PROD_WEB_URL=https://app-lifebook-web-v1.azurewebsites.net ./scripts/verify-prod.sh"
+  echo "  PROD_WEB_URL=$PROD_WEB_URL ./scripts/verify-prod.sh"
 fi
 echo ""
 echo "Done. Production will show version $NEW_VERSION after deploy completes."

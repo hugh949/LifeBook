@@ -21,6 +21,9 @@ class Settings(BaseModel):
     openai_realtime_model: str = os.getenv("OPENAI_REALTIME_MODEL", "")
     openai_text_model: str = os.getenv("OPENAI_TEXT_MODEL", "")
 
+    # ElevenLabs: AI music generation for narration BGM (Music API)
+    elevenlabs_api_key: str = os.getenv("ELEVENLABS_API_KEY", "")
+
     # Azure Speech / Speaker Recognition (Voice ID): key, region, and optional endpoint
     azure_speech_key: str = os.getenv("AZURE_SPEECH_KEY", "")
     azure_speech_region: str = os.getenv("AZURE_SPEECH_REGION", "")

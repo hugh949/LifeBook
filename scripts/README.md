@@ -2,6 +2,8 @@
 
 **Release to production (recommended):** See **docs/Release_Process.md** for the full flow. Use **`./scripts/release.sh`** to bump version, commit, push, and trigger Deploy All so production matches the version you tested locally.
 
+**If new API routes 404 in production:** See **docs/Deployment_Pitfalls_and_Learnings.md** — often traffic stayed on an old revision; run `az containerapp ingress traffic set --revision-weight latest=100`.
+
 ---
 
 ## deploy-to-github.sh

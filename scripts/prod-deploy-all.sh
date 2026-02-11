@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Trigger Deploy All (Web + API) on GitHub Actions. Use after pushing to main.
-# For full release (version bump + commit + push + deploy), use ./scripts/release.sh instead.
+# Prefer ./scripts/release.sh for full flow: verify → commit → deploy → verify.
 set -e
 cd "$(dirname "$0")/.."
 if ! command -v gh >/dev/null 2>&1; then

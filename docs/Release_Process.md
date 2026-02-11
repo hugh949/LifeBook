@@ -2,6 +2,10 @@
 
 Use this so production always shows the version you tested locally, and deploys are predictable and verifiable.
 
+**For a smooth, reliable release:** Use **[Reliable_Release_Checklist.md](Reliable_Release_Checklist.md)** — commit-first rule, step-by-step, env vars for production, and what to do if something fails.
+
+**See also:** [Deployment_Pitfalls_and_Learnings.md](Deployment_Pitfalls_and_Learnings.md) — common mistakes, root causes, and fixes (traffic routing, checkout ref, cache, etc.).
+
 ---
 
 ## Version number
@@ -22,12 +26,13 @@ From repo root:
 
 **What it does:**
 
-1. Shows current version and asks: deploy as-is, bump minor (e.g. 1.0 → 1.1), or cancel.
-2. If you bump (or pass a version): updates `version.ts`, commits with message `Release x.y`.
-3. Commits any other uncommitted changes into that release commit.
-4. Pushes to `origin main`.
-5. Triggers **Deploy All (Web + API)** via GitHub Actions (if `gh` is installed).
-6. Tells you how to verify when the workflow finishes.
+1. **Pre-release check:** Runs `check-deploy-ready.sh` (deploy config, routes, verify script).
+2. Shows current version and asks: deploy as-is, bump minor (e.g. 1.0 → 1.1), or cancel.
+3. If you bump (or pass a version): updates `version.ts`, commits with message `Release x.y`.
+4. **Requires all changes committed** — prompts strongly if uncommitted; nothing deploys unless committed.
+5. Pushes to `origin main`.
+6. Triggers **Deploy All (Web + API)** via GitHub Actions (if `gh` is installed).
+7. Optionally waits for the workflow and runs `verify-prod.sh`.
 
 **Deploy a specific version without prompts:**
 
@@ -53,6 +58,7 @@ Checks:
 
 - Web app proxy (`/api/proxy-ping`) returns 200 and `proxy: true`.
 - API health (`/api/health`) returns 200.
+- Delete endpoint (`/api/voice/stories/shared/delete`) returns 200 if the API has the route.
 
 **Check that the deployed version matches what you released:**
 
@@ -79,6 +85,7 @@ Fetches the homepage and checks the `app-version` meta tag. If it doesn’t matc
 | Goal | Script | Notes |
 |------|--------|------|
 | **Release (version + commit + push + deploy)** | `./scripts/release.sh` | Preferred for “ship what I tested”. Optionally bump version, then push and trigger Deploy All. |
+| Pre-release check | `./scripts/check-deploy-ready.sh` | Verifies deploy config, routes, scripts. Run before release or let `release.sh` run it. |
 | Commit + push only (no deploy trigger) | `./scripts/deploy-to-azure.sh` | Still triggers deploy if `gh` is installed (same as before). Prefer `release.sh` for releases. |
 | Trigger Deploy All only | `./scripts/prod-deploy-all.sh` | After you’ve already pushed. Requires `gh`. |
 | Trigger Deploy Web only | `./scripts/prod-deploy-web.sh` | When only web app or web config changed. |
@@ -106,3 +113,5 @@ Fetches the homepage and checks the `app-version` meta tag. If it doesn’t matc
 5. **Confirm in browser:** Open the production URL and check that the nav shows the same version (e.g. **v1.1**).
 
 If anything fails, check Azure Web App and Container App logs and the GitHub Actions run logs.
+
+**If new API routes return 404 in production:** See [Deployment_Pitfalls_and_Learnings.md](Deployment_Pitfalls_and_Learnings.md) — often traffic is still on an old revision; run `az containerapp ingress traffic set --revision-weight latest=100`.

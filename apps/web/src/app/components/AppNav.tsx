@@ -4,11 +4,13 @@ import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useParticipantIdentity } from "./ParticipantIdentity";
+import { useVoiceAgent } from "./VoiceAgentContext";
 import { APP_VERSION } from "../version";
 import FeedbackModal from "./FeedbackModal";
 
 export default function AppNav() {
-  const { participantId, participantLabel, participants, setParticipantId, loading, listReady } = useParticipantIdentity();
+  const { participantId, participants, setParticipantId, loading, listReady } = useParticipantIdentity();
+  const { isListening } = useVoiceAgent();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   return (
@@ -35,6 +37,31 @@ export default function AppNav() {
       </div>
       <div className="app-nav-spacer" aria-hidden="true" />
       <div className="app-nav-links">
+        <span
+          role="status"
+          aria-live="polite"
+          aria-label={isListening ? "Voice agent is listening" : "Voice agent is not listening"}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 12,
+            color: isListening ? "var(--success, #22c55e)" : "var(--ink-muted)",
+            marginRight: 8,
+          }}
+          title={isListening ? "Voice agent is listening" : "Voice agent is not listening"}
+        >
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: isListening ? "currentColor" : "var(--ink-muted)",
+              opacity: isListening ? 1 : 0.5,
+            }}
+          />
+          {isListening ? "Listening" : "Not listening"}
+        </span>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14 }}>
           <span style={{ color: "var(--ink-muted)" }}>I&rsquo;m</span>
           <select

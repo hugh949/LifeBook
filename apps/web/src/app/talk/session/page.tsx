@@ -6,6 +6,7 @@ import { getRealtimeToken, connectRealtimeWebRTC } from "@/lib/realtime";
 import { apiGet, apiPost, apiPatch, apiDelete, apiPostFormData, apiGetWithTimeout, apiPostWithTimeout } from "@/lib/api";
 import { createWavRecorderRolling, recordWavForDuration, type WavRecorderRolling } from "@/lib/wavRecorder";
 import { useParticipantIdentity } from "@/app/components/ParticipantIdentity";
+import { useVoiceAgent } from "@/app/components/VoiceAgentContext";
 
 type Status = "idle" | "identifying" | "connecting" | "connected" | "stubbed" | "error";
 
@@ -153,6 +154,7 @@ function extractTextFromContent(content: unknown): string {
 
 export default function SessionPage() {
   const { participantId: contextParticipantId, setParticipantId: setContextParticipantId, refreshParticipants, participants: contextParticipants } = useParticipantIdentity();
+  const { setIsListening } = useVoiceAgent();
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -196,6 +198,42 @@ export default function SessionPage() {
   recallSessionsRef.current = recallSessions;
   storyListRef.current = storyList;
 
+  const endSession = useCallback(() => {
+    setIsListening(false);
+    const pc = pcRef.current;
+    if (pc) {
+      pc.getSenders().forEach((s) => s.track?.stop());
+      pc.close();
+      pcRef.current = null;
+    }
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      if (audio.srcObject) {
+        (audio.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
+        audio.srcObject = null;
+      }
+    }
+    const storyAudio = storyPlaybackRef.current;
+    if (storyAudio) {
+      storyAudio.pause();
+      storyAudio.src = "";
+    }
+    const wavRec = enrollmentWavRecorderRef.current;
+    if (wavRec) {
+      wavRec.stop();
+      enrollmentWavRecorderRef.current = null;
+    }
+    const iv = enrollmentFollowUpIntervalRef.current;
+    if (iv) {
+      clearInterval(iv);
+      enrollmentFollowUpIntervalRef.current = null;
+    }
+    setStatus("idle");
+    setMessage("");
+    setContinuingFromTags(null);
+  }, [setIsListening]);
+
   useEffect(() => {
     refreshParticipants();
   }, [refreshParticipants]);
@@ -213,6 +251,13 @@ export default function SessionPage() {
     }
   }, [contextParticipantId]);
 
+  // On unmount (e.g. user navigates away): end session so voice agent stops listening/talking
+  useEffect(() => {
+    return () => {
+      endSession();
+    };
+  }, [endSession]);
+
   // When user changes "I'm [Name]": clear recall list so we never show another person's data; refetch only if this participant is unlocked
   useEffect(() => {
     setRecallSessions(null);
@@ -229,32 +274,6 @@ export default function SessionPage() {
       .then(setStoryList)
       .catch(() => setStoryList([]));
   }, [participantId]);
-
-  const endSession = useCallback(() => {
-    const pc = pcRef.current;
-    if (pc) {
-      pc.getSenders().forEach((s) => s.track?.stop());
-      pc.close();
-      pcRef.current = null;
-    }
-    if (audioRef.current?.srcObject) {
-      (audioRef.current.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
-      audioRef.current.srcObject = null;
-    }
-    const wavRec = enrollmentWavRecorderRef.current;
-    if (wavRec) {
-      wavRec.stop();
-      enrollmentWavRecorderRef.current = null;
-    }
-    const iv = enrollmentFollowUpIntervalRef.current;
-    if (iv) {
-      clearInterval(iv);
-      enrollmentFollowUpIntervalRef.current = null;
-    }
-    setStatus("idle");
-    setMessage("");
-    setContinuingFromTags(null);
-  }, []);
 
   async function handleStart(momentId?: string, recallTags?: string[], storyId?: string) {
     sessionMomentIdRef.current = momentId ?? null;
@@ -536,6 +555,7 @@ export default function SessionPage() {
         }
       };
 
+      setIsListening(true);
       setStatus("connected");
       setMessage("You’re live. Speak naturally — one question at a time. ");
     } catch (err) {

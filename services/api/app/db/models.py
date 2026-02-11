@@ -136,6 +136,14 @@ class SharedStoryListen(Base):
     listened_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
+class NarrateBgmCache(Base):
+    """Cache of AI-generated narration BGM per moment (unique music per story)."""
+    __tablename__ = "narrate_bgm_cache"
+    moment_id = Column(ID_TYPE, ForeignKey("moments.id"), primary_key=True)
+    asset_id = Column(ID_TYPE, ForeignKey("assets.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
 class VoiceStory(Base):
     """Build 5: Story from voice discussion. draft/final = private (Recall past stories); shared = in memory bank."""
     __tablename__ = "voice_stories"

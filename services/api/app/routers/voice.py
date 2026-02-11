@@ -1,27 +1,30 @@
 """Voice participant and context (Build 1: identity, Build 2: continuity)."""
 import hashlib
-import re
 import logging
+import re
 from datetime import datetime, timezone
+from uuid import uuid4
+
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
-from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
-from app.db.session import get_db
-from app.db import models
+from app.core.azure_storage import generate_upload_sas, signed_read_url
 from app.core.config import DEFAULT_FAMILY_ID, settings
-from app.core.azure_storage import signed_read_url
-from app.services.audio_convert import to_wav_16k_mono
+from app.db import models
+from app.db.session import get_db
+from app.services.ai_recall import generate_narrate_music_prompt, generate_story_title, generate_narrate_mood
+from app.services.audio_convert import to_wav_16k_mono, normalize_lufs_mp3, NARRATION_LUFS, BGM_LUFS
+from app.services.music_generation import generate_bgm_audio
 from app.services.speaker_recognition import (
-    is_available as azure_speaker_recognition_available,
-    create_profile as azure_create_profile,
     create_enrollment as azure_create_enrollment,
+    create_profile as azure_create_profile,
     identify_single_speaker as azure_identify_single_speaker,
+    is_available as azure_speaker_recognition_available,
 )
 from app.services import speaker_recognition_eagle
-from app.services.ai_recall import generate_story_title
 
 
 def speaker_recognition_available() -> bool:
@@ -1066,6 +1069,121 @@ class NarrateBody(BaseModel):
     text: str
 
 
+class NarrateMoodOut(BaseModel):
+    """Deprecated: use POST /narrate/bgm for synthetic BGM. AI-chosen track for static BGM."""
+    mood: str
+    music_brief: str = ""
+
+
+class NarrateBgmBody(BaseModel):
+    """Request synthetic BGM for narration; cached per moment_id."""
+    moment_id: str
+    text: str
+
+
+class NarrateBgmOut(BaseModel):
+    """Signed playback URL for generated BGM, or null if unavailable."""
+    url: str | None
+
+
+@router.post("/narrate/bgm", response_model=NarrateBgmOut)
+def narrate_bgm(body: NarrateBgmBody, db: Session = Depends(get_db)):
+    """Return BGM URL for this story. Cache hit: instant. Cache miss: generate via LLM + ElevenLabs Music, normalize to -24 LUFS, upload to Azure, cache and return. Returns url=null if ELEVENLABS_API_KEY or Azure not set or generation fails."""
+    moment_id = (body.moment_id or "").strip()
+    text = (body.text or "").strip()[:6000]
+    if not moment_id:
+        return NarrateBgmOut(url=None)
+    moment = (
+        db.query(models.Moment)
+        .filter(
+            models.Moment.id == moment_id,
+            models.Moment.family_id == DEFAULT_FAMILY_ID,
+            models.Moment.source == "voice_story",
+            models.Moment.shared_at.isnot(None),
+            models.Moment.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if not moment:
+        return NarrateBgmOut(url=None)
+    # Cache lookup
+    cached = (
+        db.query(models.NarrateBgmCache)
+        .filter(models.NarrateBgmCache.moment_id == moment_id)
+        .first()
+    )
+    if cached:
+        asset = db.query(models.Asset).filter(models.Asset.id == cached.asset_id).first()
+        if asset and asset.blob_url:
+            key = (getattr(settings, "azure_storage_account_key", None) or "").strip()
+            url = signed_read_url(asset.blob_url, key, expiry_minutes=settings.read_sas_ttl_minutes)
+            return NarrateBgmOut(url=url)
+    # Generate: LLM prompt -> MusicGen -> upload -> Asset -> cache
+    api_key = (getattr(settings, "openai_api_key", None) or "").strip()
+    model = (getattr(settings, "openai_text_model", None) or "").strip() or "gpt-4o-mini"
+    elevenlabs_key = (getattr(settings, "elevenlabs_api_key", None) or "").strip()
+    if not elevenlabs_key:
+        logger.info("voice/narrate/bgm: ELEVENLABS_API_KEY not set, skipping generation")
+        return NarrateBgmOut(url=None)
+    prompt = generate_narrate_music_prompt(text, api_key, model)
+    audio_bytes = generate_bgm_audio(prompt, api_key=elevenlabs_key)
+    if not audio_bytes:
+        return NarrateBgmOut(url=None)
+    normalized_bgm = normalize_lufs_mp3(audio_bytes, BGM_LUFS)
+    if normalized_bgm:
+        audio_bytes = normalized_bgm
+    # Upload to Azure
+    account = (getattr(settings, "azure_storage_account", None) or "").strip()
+    key = (getattr(settings, "azure_storage_account_key", None) or "").strip()
+    if not account or not key:
+        logger.warning("voice/narrate/bgm: Azure storage not configured, cannot store BGM")
+        return NarrateBgmOut(url=None)
+    container = getattr(settings, "audio_container", "audio") or "audio"
+    blob_name = f"narration-bgm/{uuid4()}.mp3"
+    try:
+        blob_url, upload_url = generate_upload_sas(
+            account_name=account,
+            account_key=key,
+            container=container,
+            blob_name=blob_name,
+            expiry_minutes=settings.sas_ttl_minutes,
+        )
+        with httpx.Client(timeout=30.0) as client:
+            r = client.put(upload_url, content=audio_bytes, headers={"x-ms-blob-type": "BlockBlob"})
+            r.raise_for_status()
+    except Exception as e:
+        logger.warning("voice/narrate/bgm: Azure upload failed: %s", e)
+        return NarrateBgmOut(url=None)
+    # Create Asset and cache
+    try:
+        asset = models.Asset(
+            family_id=DEFAULT_FAMILY_ID,
+            type="audio",
+            blob_url=blob_url,
+            metadata_json={"source": "narrate_bgm", "moment_id": moment_id},
+        )
+        db.add(asset)
+        db.flush()
+        db.add(models.NarrateBgmCache(moment_id=moment_id, asset_id=asset.id))
+        db.commit()
+        url = signed_read_url(blob_url, key, expiry_minutes=settings.read_sas_ttl_minutes)
+        return NarrateBgmOut(url=url)
+    except Exception as e:
+        logger.warning("voice/narrate/bgm: failed to save asset/cache: %s", e)
+        db.rollback()
+        return NarrateBgmOut(url=None)
+
+
+@router.post("/narrate/mood", response_model=NarrateMoodOut)
+def narrate_mood(body: NarrateBody):
+    """Deprecated: use POST /narrate/bgm for synthetic story-unique BGM. Returns static track id (mood) for fallback."""
+    api_key = (getattr(settings, "openai_api_key", None) or "").strip()
+    model = (getattr(settings, "openai_text_model", None) or "").strip() or "gpt-4o-mini"
+    text = (body.text or "").strip()[:6000]
+    track_id, music_brief = generate_narrate_mood(text, api_key, model)
+    return NarrateMoodOut(mood=track_id, music_brief=music_brief)
+
+
 @router.post("/stories/shared/listened")
 def mark_shared_story_listened(body: MarkListenedBody, db: Session = Depends(get_db)):
     """Mark a shared story as listened by this participant (idempotent). Call after playback."""
@@ -1253,7 +1371,11 @@ def narrate_tts(body: NarrateBody):
                 },
             )
         r.raise_for_status()
-        return Response(content=r.content, media_type="audio/mpeg")
+        content = r.content
+        normalized = normalize_lufs_mp3(content, NARRATION_LUFS)
+        if normalized:
+            content = normalized
+        return Response(content=content, media_type="audio/mpeg")
     except httpx.HTTPStatusError as e:
         logger.warning("voice/narrate: OpenAI TTS HTTP %s: %s", e.response.status_code, (e.response.text or "")[:300])
         raise HTTPException(
