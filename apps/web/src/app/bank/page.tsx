@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { API_BASE, apiGet, apiPatch, apiPost } from "@/lib/api";
-import { useParticipantIdentity } from "../components/ParticipantIdentity";
+import { useParticipantIdentity, PARTICIPANT_STORAGE_KEY } from "../components/ParticipantIdentity";
 import { requestUploadUrl, completeUpload } from "@/lib/media";
 
 type Moment = {
@@ -81,7 +81,17 @@ function isStubMediaUrl(url: string | null | undefined): boolean {
 
 export default function BankPage() {
   const { participantId } = useParticipantIdentity();
-  const normalizedParticipantId = (participantId ?? "").trim() || null;
+  const [participantIdFromStorage, setParticipantIdFromStorage] = useState<string | null>(null);
+  useEffect(() => {
+    try {
+      const stored = typeof window !== "undefined" ? window.localStorage.getItem(PARTICIPANT_STORAGE_KEY) : null;
+      setParticipantIdFromStorage(stored?.trim() || null);
+    } catch {
+      setParticipantIdFromStorage(null);
+    }
+  }, [participantId]);
+  const effectiveParticipantId = (participantId ?? participantIdFromStorage ?? "").trim() || null;
+  const normalizedParticipantId = effectiveParticipantId;
   const [moments, setMoments] = useState<Moment[]>([]);
   const [sharedStories, setSharedStories] = useState<SharedStory[]>([]);
   const [loading, setLoading] = useState(true);

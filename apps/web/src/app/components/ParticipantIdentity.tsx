@@ -36,9 +36,10 @@ export function useParticipantIdentity(): ContextValue {
   return ctx;
 }
 
-const FETCH_ABORT_MS = 10000;
-const RETRY_DELAY_MS = 2000;
-const MAX_WAIT_MS = 22000;
+/** No abort on initial load so Azure cold start (often 15–40s) can complete. Safety cap so we never block forever. */
+const INITIAL_LOAD_MAX_WAIT_MS = 90000;
+
+export const PARTICIPANT_STORAGE_KEY = STORAGE_KEY;
 
 export function ParticipantProvider({ children }: { children: React.ReactNode }) {
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -87,52 +88,37 @@ export function ParticipantProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     let cancelled = false;
-    let attempt = 0;
+    apiGet<Participant[]>("/voice/participants")
+      .then((list) => {
+        if (cancelled) return;
+        applyParticipants(list);
+        const stored = (typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null)?.trim() ?? "";
+        const unique = list.filter((p, i, arr) => arr.findIndex((x) => x.id === p.id) === i);
+        const id = stored && unique.some((p) => (p.id || "").trim() === stored) ? stored : "";
+        setParticipantIdState(id || null);
+        if (typeof window !== "undefined") {
+          if (id) localStorage.setItem(STORAGE_KEY, id);
+          else localStorage.removeItem(STORAGE_KEY);
+        }
+        setLoading(false);
+        setListReady(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setParticipants([]);
+        setLoading(false);
+        setListReady(true);
+      });
 
-    const runFetch = (): void => {
-      if (cancelled) return;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), FETCH_ABORT_MS);
-      apiGet<Participant[]>("/voice/participants", { signal: controller.signal })
-        .then((list) => {
-          if (cancelled) return;
-          clearTimeout(timeoutId);
-          applyParticipants(list);
-          const stored = (typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null)?.trim() ?? "";
-          const unique = list.filter((p, i, arr) => arr.findIndex((x) => x.id === p.id) === i);
-          const id = stored && unique.some((p) => (p.id || "").trim() === stored) ? stored : "";
-          setParticipantIdState(id || null);
-          if (typeof window !== "undefined") {
-            if (id) localStorage.setItem(STORAGE_KEY, id);
-            else localStorage.removeItem(STORAGE_KEY);
-          }
-          setLoading(false);
-          setListReady(true);
-        })
-        .catch(() => {
-          clearTimeout(timeoutId);
-          if (cancelled) return;
-          if (attempt === 0) {
-            attempt = 1;
-            setTimeout(runFetch, RETRY_DELAY_MS);
-          } else {
-            setParticipants([]);
-            setLoading(false);
-            setListReady(true);
-          }
-        });
-    };
-
-    runFetch();
-    const forceReadyId = setTimeout(() => {
+    const safetyId = setTimeout(() => {
       if (cancelled) return;
       setLoading(false);
       setListReady(true);
-    }, MAX_WAIT_MS);
+    }, INITIAL_LOAD_MAX_WAIT_MS);
 
     return () => {
       cancelled = true;
-      clearTimeout(forceReadyId);
+      clearTimeout(safetyId);
     };
   }, [applyParticipants]);
 
@@ -164,4 +150,35 @@ export function ParticipantProvider({ children }: { children: React.ReactNode })
       {children}
     </ParticipantContext.Provider>
   );
+}
+
+/** Renders children only after the participant list has loaded. Shows full-page loading until then. */
+export function ParticipantLoadingGate({ children }: { children: React.ReactNode }) {
+  const { listReady, loading } = useParticipantIdentity();
+  if (!listReady) {
+    return (
+      <div
+        className="app-shell"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: "100vh",
+          padding: 24,
+          textAlign: "center",
+        }}
+        role="status"
+        aria-live="polite"
+      >
+        <p style={{ fontSize: 18, color: "var(--ink)", margin: "0 0 8px" }}>
+          Loading participants…
+        </p>
+        <p style={{ fontSize: 14, color: "var(--ink-muted)", margin: 0 }}>
+          {loading ? "Connecting…" : "Almost ready."}
+        </p>
+      </div>
+    );
+  }
+  return <>{children}</>;
 }
