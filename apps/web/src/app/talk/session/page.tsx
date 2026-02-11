@@ -197,6 +197,9 @@ export default function SessionPage() {
   storyListRef.current = storyList;
 
   useEffect(() => {
+    refreshParticipants();
+  }, [refreshParticipants]);
+  useEffect(() => {
     apiGet<Participant[]>("/voice/participants")
       .then(setParticipants)
       .catch(() => setParticipants([]));

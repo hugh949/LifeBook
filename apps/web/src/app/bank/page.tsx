@@ -570,7 +570,7 @@ export default function BankPage() {
                         >
                           Give Reaction
                         </button>
-                        {normalizedParticipantId && s.participant_id && (s.participant_id.trim() === normalizedParticipantId) && (
+                        {normalizedParticipantId && s.participant_id && (s.participant_id.trim().toLowerCase() === normalizedParticipantId.toLowerCase()) && (
                           <button
                             type="button"
                             className="btn btn-ghost"

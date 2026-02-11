@@ -8,7 +8,7 @@ import { APP_VERSION } from "../version";
 import FeedbackModal from "./FeedbackModal";
 
 export default function AppNav() {
-  const { participantId, participantLabel, participants, setParticipantId, loading } = useParticipantIdentity();
+  const { participantId, participantLabel, participants, setParticipantId, loading, listReady } = useParticipantIdentity();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   return (
@@ -77,38 +77,38 @@ export default function AppNav() {
         </label>
         <Link
           href="/talk/session"
-          onClick={(e) => loading && e.preventDefault()}
+          onClick={(e) => !listReady && e.preventDefault()}
           style={{
-            pointerEvents: loading ? "none" : undefined,
-            opacity: loading ? 0.6 : undefined,
-            cursor: loading ? "not-allowed" : undefined,
+            pointerEvents: listReady ? undefined : "none",
+            opacity: listReady ? undefined : 0.6,
+            cursor: listReady ? undefined : "not-allowed",
           }}
-          aria-disabled={loading}
+          aria-disabled={!listReady}
         >
           My Memories
         </Link>
         <Link
           href="/bank"
-          onClick={(e) => loading && e.preventDefault()}
+          onClick={(e) => !listReady && e.preventDefault()}
           style={{
-            pointerEvents: loading ? "none" : undefined,
-            opacity: loading ? 0.6 : undefined,
-            cursor: loading ? "not-allowed" : undefined,
+            pointerEvents: listReady ? undefined : "none",
+            opacity: listReady ? undefined : 0.6,
+            cursor: listReady ? undefined : "not-allowed",
           }}
-          aria-disabled={loading}
+          aria-disabled={!listReady}
         >
           Shared Memories
         </Link>
         <button
           type="button"
           className="app-nav-link-btn"
-          onClick={() => !loading && setFeedbackOpen(true)}
-          disabled={loading}
+          onClick={() => listReady && setFeedbackOpen(true)}
+          disabled={!listReady}
           style={{
-            opacity: loading ? 0.6 : undefined,
-            cursor: loading ? "not-allowed" : undefined,
+            opacity: listReady ? undefined : 0.6,
+            cursor: listReady ? undefined : "not-allowed",
           }}
-          aria-disabled={loading}
+          aria-disabled={!listReady}
         >
           App Feedback
         </button>

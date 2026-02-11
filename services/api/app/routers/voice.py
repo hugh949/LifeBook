@@ -1114,12 +1114,14 @@ def delete_shared_story(
     )
     if not moment:
         raise HTTPException(status_code=404, detail="Shared story not found.")
-    if str(moment.participant_id or "") != (body.participant_id or "").strip():
+    author_id = (str(moment.participant_id or "") or "").strip().lower()
+    body_id = (body.participant_id or "").strip().lower()
+    if author_id != body_id:
         raise HTTPException(status_code=403, detail="Only the author can delete this story.")
     participant = (
         db.query(models.VoiceParticipant)
         .filter(
-            models.VoiceParticipant.id == body.participant_id,
+            models.VoiceParticipant.id == moment.participant_id,
             models.VoiceParticipant.family_id == DEFAULT_FAMILY_ID,
         )
         .first()
@@ -1132,7 +1134,7 @@ def delete_shared_story(
     raw = (body.code or "").strip()
     if not RECALL_PIN_PATTERN.match(raw):
         raise HTTPException(status_code=400, detail="Code must be exactly 4 digits.")
-    pid = (body.participant_id or "").strip()
+    pid = str(participant.id)
     if _hash_recall_pin(pid, raw) != stored:
         raise HTTPException(status_code=401, detail="Incorrect pass code.")
     moment.deleted_at = datetime.now(timezone.utc)
