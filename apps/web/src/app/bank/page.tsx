@@ -675,6 +675,17 @@ export default function BankPage() {
                         >
                           {narrateLoading && narratingMomentId === s.id ? "Preparing…" : isNarrating ? "⏹ Stop" : "Narrate Story"}
                         </button>
+                        {showTapToPlay && narratingMomentId === s.id && (
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            style={{ fontSize: 12, padding: "6px 10px" }}
+                            onClick={handleTapToPlayNarrate}
+                            aria-label="Tap to play narration"
+                          >
+                            Tap to play
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="btn btn-ghost"
