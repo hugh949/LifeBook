@@ -245,12 +245,36 @@ def list_participants(db: Session = Depends(get_db)):
     ]
 
 
+NEW_USER_LABEL = "New User"
+
+
 @router.post("/participants", response_model=ParticipantOut)
 def create_participant(body: ParticipantCreate, db: Session = Depends(get_db)):
-    """Add a voice participant (e.g. when agent asks for name and user says 'Sarah')."""
+    """Add a voice participant (e.g. when agent asks for name and user says 'Sarah').
+    For label 'New User' we return the single shared placeholder so we never create duplicates."""
+    label = (body.label or "").strip() or "Unknown"
+    if label == NEW_USER_LABEL:
+        existing = (
+            db.query(models.VoiceParticipant)
+            .filter(
+                models.VoiceParticipant.family_id == DEFAULT_FAMILY_ID,
+                models.VoiceParticipant.label == NEW_USER_LABEL,
+            )
+            .order_by(models.VoiceParticipant.created_at)
+            .first()
+        )
+        if existing:
+            db.refresh(existing)
+            logger.info("voice/participants: returning existing New User id=%s", existing.id)
+            return ParticipantOut(
+                id=existing.id,
+                label=existing.label,
+                has_voice_profile=_has_voice_profile(existing),
+                recall_passphrase_set=bool(getattr(existing, "recall_passphrase", None) and str(existing.recall_passphrase).strip()),
+            )
     participant = models.VoiceParticipant(
         family_id=DEFAULT_FAMILY_ID,
-        label=(body.label or "").strip() or "Unknown",
+        label=label,
     )
     db.add(participant)
     db.commit()
@@ -954,6 +978,7 @@ class SharedStoryOut(BaseModel):
     id: str  # moment_id for playback
     title: str | None
     summary: str | None
+    reaction_log: str | None = None  # family reactions (separate from story; not narrated)
     participant_id: str | None  # author; None if legacy
     participant_name: str
     created_at: str
@@ -1049,6 +1074,7 @@ def list_shared_stories(
                 id=mid,
                 title=(m.title or "").strip() or None,
                 summary=(m.summary or "").strip() or None,
+                reaction_log=(getattr(m, "reaction_log", None) or "").strip() or None,
                 participant_id=str(m.participant_id) if m.participant_id else None,
                 participant_name=participants.get(str(m.participant_id or ""), "Someone"),
                 created_at=m.created_at.isoformat() if m.created_at else "",

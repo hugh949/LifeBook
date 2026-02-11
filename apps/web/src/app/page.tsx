@@ -11,14 +11,7 @@ export default function HomePage() {
         A place for the whole family to contribute, listen, and support each other.
       </p>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-          gap: 20,
-          marginTop: 24,
-        }}
-      >
+      <div className="home-cards">
         <Link
           href="/talk/session"
           className="card"

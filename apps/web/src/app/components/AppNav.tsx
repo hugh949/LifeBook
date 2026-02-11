@@ -12,6 +12,7 @@ export default function AppNav() {
   const { participantId, participants, setParticipantId, loading, listReady } = useParticipantIdentity();
   const { isListening } = useVoiceAgent();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
     <nav className="app-nav">
@@ -29,14 +30,23 @@ export default function AppNav() {
           </Link>{" "}
           <span className="app-nav-version-tagline">
             <span className="app-nav-version">v{APP_VERSION}</span>
-            <span className="app-nav-tagline">
+            <span className="app-nav-tagline desktop-only">
               AI App by Xavor Venture Studios for Crafting and Sharing Intergenerational Family Stories
             </span>
           </span>
         </span>
       </div>
       <div className="app-nav-spacer" aria-hidden="true" />
-      <div className="app-nav-links">
+      <button
+        type="button"
+        className="app-nav-menu-btn"
+        onClick={() => setMenuOpen((o) => !o)}
+        aria-expanded={menuOpen}
+        aria-label="Open menu"
+      >
+        <span style={{ fontSize: 24, lineHeight: 1 }}>{menuOpen ? "✕" : "☰"}</span>
+      </button>
+      <div className={`app-nav-links ${menuOpen ? "open" : ""}`}>
         <span
           role="status"
           aria-live="polite"

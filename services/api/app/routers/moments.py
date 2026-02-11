@@ -57,6 +57,7 @@ def _moment_to_response(m, thumb_url: str | None = None, image_url: str | None =
         "updated_at": m.updated_at.isoformat() if m.updated_at else None,
         "shared_at": m.shared_at.isoformat() if getattr(m, "shared_at", None) else None,
         "participant_id": str(m.participant_id) if m.participant_id else None,
+        "reaction_log": (getattr(m, "reaction_log", None) or "").strip() or None,
     }
     if thumb_url is not None:
         out["thumbnail_url"] = thumb_url
@@ -270,8 +271,9 @@ def patch_moment(moment_id: str, body: MomentPatch, db: Session = Depends(get_db
         if not moment:
             raise HTTPException(status_code=404, detail="Moment not found")
         if body.add_comment and body.add_comment.strip():
-            existing = (moment.summary or "").strip()
-            moment.summary = f"{existing}\n\n{body.add_comment.strip()}" if existing else body.add_comment.strip()
+            # Store reactions in reaction_log (newest at top) so they stay separate from story text and are not narrated
+            existing = (getattr(moment, "reaction_log", None) or "").strip()
+            moment.reaction_log = f"{body.add_comment.strip()}\n\n{existing}" if existing else body.add_comment.strip()
         if body.title is not None:
             moment.title = body.title
         if body.summary is not None:

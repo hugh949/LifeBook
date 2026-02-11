@@ -11,9 +11,19 @@ necessary. Back up the database first.
 Run from services/api with: uv run python scripts/wipe_all_participants_and_data.py --confirm
 """
 import argparse
+import os
 import sys
 
 from app.core.config import DEFAULT_FAMILY_ID
+
+
+def _is_production_database_url(url: str) -> bool:
+    """Return True if url looks like production (e.g. Azure)."""
+    if not url:
+        return False
+    return "database.azure.com" in url or ".postgres.database.azure.com" in url
+
+
 from app.db.session import SessionLocal
 from app.db import models
 
@@ -129,11 +139,24 @@ def main():
         action="store_true",
         help="Required: confirm you want to wipe (otherwise script does nothing)",
     )
+    parser.add_argument(
+        "--confirm-production",
+        action="store_true",
+        help="Required when DATABASE_URL is production (e.g. Azure): confirm you intend to wipe production",
+    )
     args = parser.parse_args()
 
     if not args.confirm:
         print("Run with --confirm to wipe all participant and related data.", file=sys.stderr)
         sys.exit(1)
+
+    if _is_production_database_url(os.environ.get("DATABASE_URL", "")):
+        if not args.confirm_production and os.environ.get("LIFEBOOK_ALLOW_PROD_WIPE") != "1":
+            print(
+                "ERROR: DATABASE_URL appears to be production. Pass --confirm-production or set LIFEBOOK_ALLOW_PROD_WIPE=1.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     db = SessionLocal()
     try:

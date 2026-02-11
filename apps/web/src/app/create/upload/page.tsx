@@ -125,7 +125,7 @@ export default function UploadPage() {
               onDrop={onDrop}
               onDragOver={onDragOver}
               onDragLeave={onDragLeave}
-              className="card"
+              className="card upload-drop-zone"
               style={{
                 marginBottom: 8,
                 border: `2px dashed ${drag ? "var(--accent)" : "var(--border)"}`,
@@ -142,7 +142,7 @@ export default function UploadPage() {
                 style={{ display: "none" }}
                 id="file-upload"
               />
-              <label htmlFor="file-upload" style={{ cursor: "pointer", display: "block" }}>
+              <label htmlFor="file-upload" style={{ cursor: "pointer", display: "block", width: "100%", minHeight: 120 }}>
                 {preview ? (
                   <div>
                     {file?.type.startsWith("image/") ? (
@@ -182,16 +182,8 @@ export default function UploadPage() {
               placeholder="e.g. Grandpa, tell us about this day!"
               rows={3}
               maxLength={500}
-              className="card"
-              style={{
-                width: "100%",
-                resize: "vertical",
-                fontFamily: "inherit",
-                fontSize: 16,
-                padding: 12,
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)",
-              }}
+              className="input"
+              style={{ width: "100%", resize: "vertical" }}
             />
           </section>
 
@@ -205,15 +197,8 @@ export default function UploadPage() {
               onChange={(e) => setWhoFor(e.target.value)}
               placeholder="e.g. For the family, For Grandpa"
               maxLength={120}
-              className="card"
-              style={{
-                width: "100%",
-                fontFamily: "inherit",
-                fontSize: 16,
-                padding: 12,
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)",
-              }}
+              className="input"
+              style={{ width: "100%" }}
             />
           </section>
 
@@ -222,7 +207,7 @@ export default function UploadPage() {
             className="btn btn-primary"
             disabled={status === "uploading" || !file}
             aria-disabled={status === "uploading" || !file}
-            style={{ width: "100%", fontSize: "1.1rem", padding: 16 }}
+            style={{ width: "100%", minHeight: "var(--touch)", fontSize: "1.1rem" }}
           >
             {status === "uploading" ? "Adding…" : !file ? "Choose a photo or audio first" : "Save to My memories"}
           </button>
@@ -250,13 +235,14 @@ export default function UploadPage() {
           <p style={{ margin: "0 0 24px", color: "var(--ink-muted)", textAlign: "center" }}>
             {message}
           </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "center" }}>
-            <Link href="/my" className="btn btn-primary" style={{ textDecoration: "none", color: "white" }}>
+          <div className="action-row" style={{ justifyContent: "center" }}>
+            <Link href="/my" className="btn btn-primary" style={{ textDecoration: "none", color: "white", minHeight: "var(--touch)" }}>
               View My memories
             </Link>
             <button
               type="button"
               className="btn btn-ghost"
+              style={{ minHeight: "var(--touch)" }}
               onClick={() => {
                 setStatus("idle");
                 setMessage("");

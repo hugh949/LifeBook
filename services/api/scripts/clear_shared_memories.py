@@ -11,14 +11,24 @@ Run from services/api with production DATABASE_URL:
   DATABASE_URL='postgresql://...' uv run python scripts/clear_shared_memories.py --confirm
 """
 import argparse
+import os
 import sys
 
 from app.core.config import DEFAULT_FAMILY_ID
+
+
+def _is_production_database_url(url: str) -> bool:
+    """Return True if url looks like production (e.g. Azure)."""
+    if not url:
+        return False
+    return "database.azure.com" in url or ".postgres.database.azure.com" in url
+
+
 from app.db.session import SessionLocal
 from app.db import models
 
 
-def clear_shared_memories(db):
+def _clear_shared_memories_impl(db):
     """Hard-delete all shared voice story moments (default family) and dependent rows."""
     moment_ids = [
         r[0]
@@ -94,16 +104,29 @@ def main():
         action="store_true",
         help="Required: confirm you want to clear shared memories (otherwise script does nothing)",
     )
+    parser.add_argument(
+        "--confirm-production",
+        action="store_true",
+        help="Required when DATABASE_URL is production (e.g. Azure): confirm you intend to clear production",
+    )
     args = parser.parse_args()
 
     if not args.confirm:
         print("Run with --confirm to clear all shared memories.", file=sys.stderr)
         sys.exit(1)
 
+    if _is_production_database_url(os.environ.get("DATABASE_URL", "")):
+        if not args.confirm_production and os.environ.get("LIFEBOOK_ALLOW_PROD_WIPE") != "1":
+            print(
+                "ERROR: DATABASE_URL appears to be production. Pass --confirm-production or set LIFEBOOK_ALLOW_PROD_WIPE=1.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
     db = SessionLocal()
     try:
         print("Hard-deleting shared memories for default family...")
-        count = clear_shared_memories(db)
+        count = _clear_shared_memories_impl(db)
         db.commit()
         print(f"Done. Removed {count} shared voice story moment(s) and dependent rows.")
     except Exception as e:

@@ -14,7 +14,7 @@ class MomentCreate(BaseModel):
 
 
 class MomentPatch(BaseModel):
-    add_comment: str | None = None  # append to summary (voice or text comment)
+    add_comment: str | None = None  # append to reaction_log (family feedback; not narrated)
     title: str | None = None
     summary: str | None = None
     add_voice_comment_asset_id: str | None = None  # link audio asset as voice_note comment

@@ -109,35 +109,17 @@ export default function FeedbackModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="feedback-modal-title"
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 50,
-        display: "flex",
-        alignItems: "flex-start",
-        justifyContent: "center",
-        overflow: "auto",
-        background: "rgba(0,0,0,0.4)",
-        padding: "max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left))",
-      }}
+      className="feedback-modal-overlay"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
-        className="card"
-        style={{
-          maxWidth: 480,
-          width: "100%",
-          minWidth: 0,
-          margin: "0 auto 2rem",
-          padding: 0,
-          overflow: "hidden",
-          position: "relative",
-        }}
+        className="card feedback-modal-panel"
         onClick={(e) => e.stopPropagation()}
       >
         <div
           style={{
             padding: "12px 16px",
+            paddingTop: "max(12px, env(safe-area-inset-top))",
             borderBottom: "1px solid var(--border)",
           }}
         >
@@ -145,7 +127,7 @@ export default function FeedbackModal({
             App Feedback
           </h2>
         </div>
-        <div style={{ padding: "20px 16px" }}>
+        <div style={{ padding: "20px 16px", paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}>
           <label style={{ display: "block", marginBottom: 8, fontWeight: 500, fontSize: 14 }}>
             Feedback
           </label>
@@ -154,18 +136,11 @@ export default function FeedbackModal({
             onChange={(e) => setText(e.target.value)}
             placeholder="Share your feedback: use cases, feature ideas, or report a bug..."
             rows={5}
+            className="input"
             style={{
               width: "100%",
-              padding: "12px",
-              borderRadius: "var(--radius)",
-              border: "1px solid var(--border)",
-              background: "var(--bg)",
-              color: "var(--ink)",
-              fontSize: 16,
-              resize: "vertical",
               marginBottom: 16,
-              boxSizing: "border-box",
-              fontFamily: "inherit",
+              resize: "vertical",
               minHeight: 120,
             }}
             aria-required
@@ -198,11 +173,11 @@ export default function FeedbackModal({
               {error}
             </p>
           )}
-          <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
-            <button type="button" className="btn btn-ghost" onClick={onClose}>
+          <div className="action-row" style={{ justifyContent: "center" }}>
+            <button type="button" className="btn btn-ghost" onClick={onClose} style={{ minHeight: "var(--touch)" }}>
               Cancel
             </button>
-            <button type="button" className="btn btn-ghost" onClick={handleSend}>
+            <button type="button" className="btn btn-ghost" onClick={handleSend} style={{ minHeight: "var(--touch)" }}>
               Send feedback
             </button>
           </div>

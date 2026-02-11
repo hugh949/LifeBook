@@ -1,5 +1,6 @@
 # Deploy FastAPI (LifeBook API) to Azure Container Apps.
 # Trigger: only via Deploy All (workflow_call) or manual workflow_dispatch. No push trigger to avoid duplicate runs.
+# When DATABASE_URL secret is set: runs Alembic migrations (upgrade head) against production DB before deploying.
 # Builds Docker image from services/api with --no-cache and BUILD_SHA=${{ github.sha }}, pushes to ACR,
 # updates Container App, routes traffic to latest, then verifies production /health build_sha == github.sha.
 # All Azure resources must be in West US 3 (westus3).
@@ -226,6 +227,22 @@ jobs:
           done
           echo "==> ERROR: Registry set failed after 10 retries."
           exit 1
+
+      - name: Run database migrations (production)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -e
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "==> DATABASE_URL not set; skipping migrations (set the secret to run migrations on deploy)."
+            exit 0
+          fi
+          echo "==> Running Alembic migrations against production DB..."
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          export PATH="$HOME/.local/bin:$PATH"
+          cd services/api
+          uv run alembic upgrade head
+          echo "==> Migrations complete."
 
       - name: Deploy to Container Apps
         env:

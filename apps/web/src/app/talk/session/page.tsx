@@ -579,65 +579,67 @@ export default function SessionPage() {
         )}
         {status === "idle" && (
           <>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => handleStart()}
-              style={{ width: "100%", fontSize: "1.1rem", padding: "16px" }}
-            >
-              Start talking
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => {
-                const pid = contextParticipantId ?? "";
-                if (!pid) {
-                  setRecallSessions([]);
+            <div className="talk-idle-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => handleStart()}
+                style={{ width: "100%" }}
+              >
+                Start talking
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  const pid = contextParticipantId ?? "";
+                  if (!pid) {
+                    setRecallSessions([]);
+                    setStoryList(null);
+                    return;
+                  }
+                  if (!isRecallUnlocked(pid)) {
+                    setRecallUnlockPending("conversations");
+                    setPinError("");
+                    return;
+                  }
                   setStoryList(null);
-                  return;
-                }
-                if (!isRecallUnlocked(pid)) {
-                  setRecallUnlockPending("conversations");
-                  setPinError("");
-                  return;
-                }
-                setStoryList(null);
-                apiGet<VoiceSession[]>(`/voice/sessions?participant_id=${encodeURIComponent(pid)}`)
-                  .then((sessions) => {
-                    const seen = new Set<string>();
-                    setRecallSessions(sessions.filter((s) => (!seen.has(s.id) && (seen.add(s.id), true))));
-                  })
-                  .catch(() => setRecallSessions([]));
-              }}
-              style={{ width: "100%", marginTop: 8 }}
-            >
-              Recall a past conversation
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => {
-                const pid = contextParticipantId ?? "";
-                if (!pid) {
-                  setStoryList([]);
+                  apiGet<VoiceSession[]>(`/voice/sessions?participant_id=${encodeURIComponent(pid)}`)
+                    .then((sessions) => {
+                      const seen = new Set<string>();
+                      setRecallSessions(sessions.filter((s) => (!seen.has(s.id) && (seen.add(s.id), true))));
+                    })
+                    .catch(() => setRecallSessions([]));
+                }}
+                style={{ width: "100%" }}
+              >
+                Recall a past conversation
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  const pid = contextParticipantId ?? "";
+                  if (!pid) {
+                    setStoryList([]);
+                    setRecallSessions(null);
+                    return;
+                  }
+                  if (!isRecallUnlocked(pid)) {
+                    setRecallUnlockPending("stories");
+                    setPinError("");
+                    return;
+                  }
                   setRecallSessions(null);
-                  return;
-                }
-                if (!isRecallUnlocked(pid)) {
-                  setRecallUnlockPending("stories");
-                  setPinError("");
-                  return;
-                }
-                setRecallSessions(null);
-                apiGet<VoiceStory[]>(`/voice/stories?participant_id=${encodeURIComponent(pid)}`)
-                  .then(setStoryList)
-                  .catch(() => setStoryList([]));
-              }}
-              style={{ width: "100%", marginTop: 4 }}
-            >
-              Recall past stories
-            </button>
+                  apiGet<VoiceStory[]>(`/voice/stories?participant_id=${encodeURIComponent(pid)}`)
+                    .then(setStoryList)
+                    .catch(() => setStoryList([]));
+                }}
+                style={{ width: "100%" }}
+              >
+                Recall past stories
+              </button>
+            </div>
             {contextParticipantId && !changingCode && !settingCode && recallUnlockPending === null && (() => {
               const participant = contextParticipants.find((p) => p.id === contextParticipantId);
               const hasCode = !!participant?.recall_passphrase_set;
@@ -855,24 +857,10 @@ export default function SessionPage() {
                   ) : (
                     recallSessions.map((s) => (
                       <li key={s.id} style={{ marginBottom: 10 }}>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "stretch",
-                            gap: 8,
-                            minHeight: 44,
-                          }}
-                        >
+                        <div className="talk-recall-item">
                           <button
                             type="button"
-                            className="btn"
-                            style={{
-                              flex: 1,
-                              textAlign: "left",
-                              padding: "12px 14px",
-                              fontSize: 14,
-                              minWidth: 0,
-                            }}
+                            className="btn talk-recall-primary"
                             onClick={() => handleStart(s.id, s.reminder_tags)}
                           >
                             <span style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
@@ -897,58 +885,44 @@ export default function SessionPage() {
                               </span>
                             )}
                           </button>
-                          <button
-                            type="button"
-                            className="btn btn-ghost"
-                            style={{
-                              flexShrink: 0,
-                              alignSelf: "center",
-                              padding: "8px 10px",
-                              fontSize: 11,
-                              minWidth: 44,
-                              minHeight: 44,
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (!participantId) return;
-                              handleStart(s.id, s.reminder_tags);
-                            }}
-                            title="Turn into story"
-                            aria-label="Turn this conversation into a story with the voice agent"
-                          >
-                            Turn into story
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-ghost"
-                            style={{
-                              flexShrink: 0,
-                              alignSelf: "center",
-                              padding: "10px 12px",
-                              fontSize: 12,
-                              minWidth: 44,
-                              minHeight: 44,
-                              color: "var(--ink-muted)",
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (!participantId) return;
-                              if (!window.confirm("Remove this conversation from the list?")) return;
-                              apiDelete(
-                                `/voice/sessions/${encodeURIComponent(s.id)}?participant_id=${encodeURIComponent(participantId)}`
-                              )
-                                .then(() => {
-                                  setRecallSessions((prev) => (prev ? prev.filter((x) => x.id !== s.id) : null));
-                                })
-                                .catch((err) => {
-                                  setMessage(err instanceof Error ? err.message : "Could not remove.");
-                                });
-                            }}
-                            title="Remove from list"
-                            aria-label="Remove this conversation from the list"
-                          >
-                            Remove
-                          </button>
+                          <div className="talk-recall-secondary">
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!participantId) return;
+                                handleStart(s.id, s.reminder_tags);
+                              }}
+                              title="Turn into story"
+                              aria-label="Turn this conversation into a story with the voice agent"
+                            >
+                              Turn into story
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ color: "var(--ink-muted)" }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!participantId) return;
+                                if (!window.confirm("Remove this conversation from the list?")) return;
+                                apiDelete(
+                                  `/voice/sessions/${encodeURIComponent(s.id)}?participant_id=${encodeURIComponent(participantId)}`
+                                )
+                                  .then(() => {
+                                    setRecallSessions((prev) => (prev ? prev.filter((x) => x.id !== s.id) : null));
+                                  })
+                                  .catch((err) => {
+                                    setMessage(err instanceof Error ? err.message : "Could not remove.");
+                                  });
+                              }}
+                              title="Remove from list"
+                              aria-label="Remove this conversation from the list"
+                            >
+                              Remove
+                            </button>
+                          </div>
                         </div>
                       </li>
                     ))
@@ -1196,6 +1170,7 @@ export default function SessionPage() {
                 {message}
               </p>
             </div>
+            <div className="talk-connected-actions">
             <button
               type="button"
               className="btn btn-ghost"
@@ -1250,6 +1225,7 @@ export default function SessionPage() {
             >
               End session
             </button>
+            </div>
           </>
         )}
 

@@ -14,12 +14,14 @@ type Moment = {
   thumbnail_url?: string | null;
   image_url?: string | null;
   participant_id?: string | null;
+  reaction_log?: string | null;
 };
 
 type SharedStory = {
   id: string;
   title: string | null;
   summary: string | null;
+  reaction_log?: string | null;
   participant_id?: string | null;
   participant_name: string;
   created_at: string;
@@ -117,6 +119,11 @@ export default function BankPage() {
   const [loading, setLoading] = useState(true);
   /** When set, show recall-code prompt to delete this shared story (author only). */
   const [deleteStoryId, setDeleteStoryId] = useState<string | null>(null);
+  /** When set, show inline edit for this story's text (author only). */
+  const [editingStoryId, setEditingStoryId] = useState<string | null>(null);
+  const [editingStoryText, setEditingStoryText] = useState("");
+  const [editingStorySaving, setEditingStorySaving] = useState(false);
+  const [editingStoryError, setEditingStoryError] = useState<string | null>(null);
   const [deleteCode, setDeleteCode] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteSending, setDeleteSending] = useState(false);
@@ -126,8 +133,10 @@ export default function BankPage() {
   const [playingUrl, setPlayingUrl] = useState<string | null>(null);
   /** When set, show in-place detail panel (no navigation to /m/[id]). */
   const [selectedMomentId, setSelectedMomentId] = useState<string | null>(null);
-  /** When set, this voice story row is expanded in place for play + comment (no modal). */
+  /** When set, this voice story row is expanded in place. */
   const [expandedVoiceId, setExpandedVoiceId] = useState<string | null>(null);
+  /** What to show when expanded: view (story + reactions), reaction (reactions + form), edit (story edit only). */
+  const [expandedMode, setExpandedMode] = useState<"view" | "reaction" | "edit" | null>(null);
   /** Playback URL for the expanded voice story (so audio is playable inline). */
   const [expandedPlaybackUrl, setExpandedPlaybackUrl] = useState<string | null>(null);
 
@@ -158,6 +167,8 @@ export default function BankPage() {
   const narrateAudioRef = useRef<HTMLAudioElement | null>(null);
   const narrateUrlRef = useRef<string | null>(null);
   const narrateBgmRef = useRef<HTMLAudioElement | null>(null);
+  /** True once playback finished naturally (onended); used to ignore spurious onerror after cleanup. */
+  const narratePlaybackCompletedRef = useRef(false);
   /** When TTS is ready but user has not tapped play yet (avoids autoplay block). */
   const [showTapToPlay, setShowTapToPlay] = useState(false);
   const narratePendingBgmUrlRef = useRef<string | null>(null);
@@ -319,11 +330,19 @@ export default function BankPage() {
       const audio = new Audio(url);
       narrateAudioRef.current = audio;
       audio.onended = () => {
+        narratePlaybackCompletedRef.current = true;
         cleanupNarrate();
         setNarratingMomentId(null);
         setShowTapToPlay(false);
       };
       audio.onerror = () => {
+        // Ignore error if playback already finished (some browsers fire error after we revoke the blob in cleanup)
+        if (narratePlaybackCompletedRef.current) {
+          cleanupNarrate();
+          setNarratingMomentId(null);
+          setShowTapToPlay(false);
+          return;
+        }
         cleanupNarrate();
         setNarratingMomentId(null);
         setShowTapToPlay(false);
@@ -404,6 +423,7 @@ export default function BankPage() {
   }
 
   function stopNarrate() {
+    narratePlaybackCompletedRef.current = false;
     cleanupNarrate();
     setNarratingMomentId(null);
     setNarrateError(null);
@@ -529,21 +549,14 @@ export default function BankPage() {
       <nav
         role="tablist"
         aria-label="Shared Memories sections"
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 8,
-          marginBottom: 24,
-          paddingBottom: 16,
-          borderBottom: "1px solid var(--border)",
-        }}
+        className="bank-tabs"
       >
         <button
           type="button"
           role="tab"
           aria-selected={bankView === "voice"}
           className={bankView === "voice" ? "btn btn-primary" : "btn btn-ghost"}
-          style={{ fontSize: 13, padding: "8px 14px" }}
+          style={{ fontSize: 13 }}
           onClick={() => setBankView("voice")}
         >
           Voice Stories
@@ -553,7 +566,7 @@ export default function BankPage() {
           role="tab"
           aria-selected={bankView === "photos"}
           className={bankView === "photos" ? "btn btn-primary" : "btn btn-ghost"}
-          style={{ fontSize: 13, padding: "8px 14px" }}
+          style={{ fontSize: 13 }}
           onClick={() => setBankView("photos")}
         >
           Photo Album
@@ -563,7 +576,7 @@ export default function BankPage() {
           role="tab"
           aria-selected={bankView === "videos"}
           className={bankView === "videos" ? "btn btn-primary" : "btn btn-ghost"}
-          style={{ fontSize: 13, padding: "8px 14px" }}
+          style={{ fontSize: 13 }}
           onClick={() => setBankView("videos")}
         >
           Videos (coming soon)
@@ -571,7 +584,7 @@ export default function BankPage() {
         <a
           href="/create/upload"
           className="btn btn-ghost"
-          style={{ fontSize: 13, padding: "8px 14px", textDecoration: "none", color: "var(--primary)", marginLeft: "auto" }}
+          style={{ fontSize: 13, textDecoration: "none", color: "var(--primary)", marginLeft: "auto" }}
         >
           Add a Memory
         </a>
@@ -587,6 +600,7 @@ export default function BankPage() {
               id: m.id,
               title: m.title ?? null,
               summary: m.summary ?? null,
+              reaction_log: m.reaction_log ?? null,
               participant_id: m.participant_id ?? null,
               participant_name: "Someone",
               created_at: m.created_at ?? "",
@@ -648,78 +662,121 @@ export default function BankPage() {
                           {displayTitle}
                         </p>
                       )}
-                      <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          style={{ fontSize: 12, padding: "6px 10px" }}
-                          onClick={() => {
-                            setExpandedVoiceId(isExpanded ? null : s.id);
-                            setInlineCommentText("");
-                            setInlineCommentError(null);
-                            setRecordError(null);
-                            setNarrateError(null);
-                            if (!isExpanded) stopNarrate();
-                          }}
-                          aria-expanded={isExpanded}
-                        >
-                          {isExpanded ? "Collapse" : "View Story"}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          style={{ fontSize: 12, padding: "6px 10px" }}
-                          onClick={() => (isNarrating ? stopNarrate() : narrateStory(s))}
-                          disabled={narrateLoading}
-                          aria-label="Narrate story with voice agent quality"
-                        >
-                          {narrateLoading && narratingMomentId === s.id ? "Preparing…" : isNarrating ? "⏹ Stop" : "Narrate Story"}
-                        </button>
-                        {showTapToPlay && narratingMomentId === s.id && (
-                          <button
-                            type="button"
-                            className="btn btn-primary"
-                            style={{ fontSize: 12, padding: "6px 10px" }}
-                            onClick={handleTapToPlayNarrate}
-                            aria-label="Tap to play narration"
-                          >
-                            Tap to play
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          style={{ fontSize: 12, padding: "6px 10px" }}
-                          onClick={() => {
-                            if (!isExpanded) setExpandedVoiceId(s.id);
-                            setInlineCommentError(null);
-                            setRecordError(null);
-                            setNarrateError(null);
-                          }}
-                        >
-                          Give Reaction
-                        </button>
-                        {normalizedParticipantId && (() => {
-                          const isDeletable = sharedStoryIdSet(sharedStories).has(s.id);
-                          if (!isDeletable) return false;
-                          const matchById = s.participant_id && (s.participant_id.trim().toLowerCase() === normalizedParticipantId.toLowerCase());
-                          const matchByName = !s.participant_id && currentUserLabel && (s.participant_name?.trim() || "").toLowerCase() === currentUserLabel.toLowerCase();
-                          return matchById || matchByName;
-                        })() && (
+                      <div className="bank-voice-actions-row">
+                        <div className="bank-voice-primary-actions">
                           <button
                             type="button"
                             className="btn btn-ghost"
-                            style={{ fontSize: 12, padding: "6px 10px", color: "var(--error)" }}
                             onClick={() => {
-                              setDeleteStoryId(s.id);
-                              setDeleteCode("");
-                              setDeleteError(null);
+                              if (isExpanded) {
+                                setExpandedVoiceId(null);
+                                setExpandedMode(null);
+                                setEditingStoryId(null);
+                                setEditingStoryText("");
+                              } else {
+                                setExpandedVoiceId(s.id);
+                                setExpandedMode("view");
+                                setInlineCommentText("");
+                                setInlineCommentError(null);
+                                setRecordError(null);
+                                setNarrateError(null);
+                                stopNarrate();
+                              }
                             }}
-                            aria-label="Delete this story (author only)"
+                            aria-expanded={isExpanded}
                           >
-                            Delete story
+                            {isExpanded ? "Collapse" : "View Story"}
                           </button>
-                        )}
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => {
+                              if (isNarrating) stopNarrate();
+                              else narrateStory(s);
+                            }}
+                            disabled={narrateLoading}
+                            aria-label="Narrate story with voice agent quality"
+                          >
+                            {narrateLoading && narratingMomentId === s.id ? "Preparing…" : isNarrating ? "⏹ Stop" : "Narrate Story"}
+                          </button>
+                          {/* Inline narrate status (no need to expand); show when this story is being narrated */}
+                          {narratingMomentId === s.id && (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                              {narrateLoading && (
+                                <span style={{ fontSize: 13, color: "var(--ink-muted)" }}>
+                                  <span style={{ width: 16, height: 16, border: "2px solid var(--border)", borderTopColor: "var(--ink)", borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block", verticalAlign: "middle", marginRight: 6 }} aria-hidden />
+                                  Preparing…
+                                </span>
+                              )}
+                              {showTapToPlay && !narrateLoading && (
+                                <button
+                                  type="button"
+                                  className="btn btn-primary"
+                                  onClick={handleTapToPlayNarrate}
+                                  aria-label="Tap to play narration"
+                                  style={{ fontSize: 13 }}
+                                >
+                                  Tap to play
+                                </button>
+                              )}
+                              {narrateError && expandedVoiceId !== s.id && (
+                                <span role="alert" style={{ fontSize: 12, color: "var(--error)" }}>{narrateError}</span>
+                              )}
+                            </span>
+                          )}
+                        </div>
+                        <div className="bank-voice-secondary-actions">
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => {
+                              setExpandedVoiceId(s.id);
+                              setExpandedMode("reaction");
+                              setInlineCommentError(null);
+                              setRecordError(null);
+                              setNarrateError(null);
+                            }}
+                          >
+                            Give Reaction
+                          </button>
+                          {normalizedParticipantId && (() => {
+                            const isDeletable = sharedStoryIdSet(sharedStories).has(s.id);
+                            if (!isDeletable) return false;
+                            const matchById = s.participant_id && (s.participant_id.trim().toLowerCase() === normalizedParticipantId.toLowerCase());
+                            const matchByName = !s.participant_id && currentUserLabel && (s.participant_name?.trim() || "").toLowerCase() === currentUserLabel.toLowerCase();
+                            return matchById || matchByName;
+                          })() && (
+                            <>
+                              <button
+                                type="button"
+                                className="btn btn-ghost"
+                                onClick={() => {
+                                  setExpandedVoiceId(s.id);
+                                  setExpandedMode("edit");
+                                  setEditingStoryId(s.id);
+                                  setEditingStoryText(s.summary?.trim() ?? "");
+                                  setEditingStoryError(null);
+                                }}
+                                aria-label="Edit Story (author only)"
+                              >
+                                Edit Story
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-ghost"
+                                style={{ color: "var(--error)" }}
+                                onClick={() => {
+                                  setDeleteStoryId(s.id);
+                                  setDeleteCode("");
+                                  setDeleteError(null);
+                                }}
+                                aria-label="Delete this story (author only)"
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
                       {deleteStoryId === s.id && (
                         <div style={{ marginTop: 12, marginLeft: 36, padding: 12, background: "var(--bg)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
@@ -773,7 +830,10 @@ export default function BankPage() {
                                   // Remove from UI immediately so it disappears (don't wait for refetch)
                                   setSharedStories((prev) => prev.filter((x) => x.id !== deletedId));
                                   setMoments((prev) => prev.filter((m) => m.id !== deletedId));
-                                  if (expandedVoiceId === deletedId) setExpandedVoiceId(null);
+                                  if (expandedVoiceId === deletedId) {
+                                    setExpandedVoiceId(null);
+                                    setExpandedMode(null);
+                                  }
                                   if (playingMomentId === deletedId) setPlayingMomentId(null);
                                   if (selectedMomentId === deletedId) setSelectedMomentId(null);
                                 } catch (err) {
@@ -821,114 +881,137 @@ export default function BankPage() {
                   </div>
                   {isExpanded && (
                     <div style={{ marginTop: 12, marginLeft: 36, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
-                      {/* View Story: full story content */}
-                      <section style={{ marginBottom: 16 }} aria-label="Story content">
-                        <p style={{ margin: "0 0 4px", fontSize: 11, fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase" }}>Story</p>
-                        {s.summary?.trim() ? (
-                          <p style={{ margin: 0, fontSize: 14, color: "var(--ink)", whiteSpace: "pre-wrap" }}>
-                            {s.summary.trim()}
-                          </p>
-                        ) : (
-                          <p style={{ margin: 0, fontSize: 13, color: "var(--ink-muted)" }}>No story text.</p>
-                        )}
-                      </section>
-                      {/* Narrate Story: synthetic BGM (unique per story) + OpenAI TTS (same voice as agent) */}
-                      <section style={{ marginBottom: 16 }} aria-label="Narrate story">
-                        <p style={{ margin: "0 0 6px", fontSize: 11, fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase" }}>Narrate Story</p>
-                        <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--ink-muted)" }}>
-                          AI generates unique background music for this story and narrates with the same voice as the voice companion. First time may take a minute.
-                        </p>
-                        <p style={{ margin: "0 0 8px", fontSize: 11, color: "var(--ink-muted)", fontStyle: "italic" }}>
-                          OpenAI narrates; ElevenLabs adds the music.
-                        </p>
-                        {narrateLoading && narratingMomentId === s.id && expandedVoiceId === s.id && (
-                          <p style={{ margin: "0 0 8px", fontSize: 13, color: "var(--ink)", display: "flex", alignItems: "center", gap: 8 }}>
-                            <span style={{ width: 18, height: 18, border: "2px solid var(--border)", borderTopColor: "var(--ink)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} aria-hidden />
-                            Preparing narration and unique music… You&apos;ll hear it in a moment.
-                          </p>
-                        )}
-                        {narrateError && expandedVoiceId === s.id && (
-                          <p role="alert" style={{ color: "var(--error)", fontSize: 12, margin: "0 0 8px" }}>{narrateError}</p>
-                        )}
-                        {showTapToPlay && narratingMomentId === s.id && expandedVoiceId === s.id && (
-                          <p style={{ margin: "0 0 8px" }}>
-                            <button
-                              type="button"
-                              className="btn btn-primary"
-                              onClick={handleTapToPlayNarrate}
-                              aria-label="Tap to play narration"
-                            >
-                              Tap to play narration
-                            </button>
-                          </p>
-                        )}
-                        {s.has_audio && expandedPlaybackUrl && (
-                          <p style={{ margin: "0 0 4px", fontSize: 11, color: "var(--ink-muted)" }}>Original recording:</p>
-                        )}
-                        {s.has_audio && expandedVoiceId === s.id && (expandedPlaybackUrl ? (
-                          <audio
-                            controls
-                            src={expandedPlaybackUrl}
-                            style={{ width: "100%", maxWidth: 320, height: 36, marginBottom: 8 }}
-                            preload="metadata"
-                          />
-                        ) : (
-                          <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--ink-muted)" }}>Loading original audio…</p>
-                        ))}
-                      </section>
-                      {/* Give Reaction: type only; reactions stored with name · timestamp for log */}
-                      <section style={{ marginBottom: 0 }} aria-label="Give reaction">
-                        <p style={{ margin: "0 0 10px", fontSize: 11, fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase" }}>Give Reaction</p>
-                        <form onSubmit={handleInlineAddComment} style={{ display: "flex", flexDirection: "column", gap: 0, maxWidth: 400 }}>
-                          <label htmlFor="reaction-name" style={{ marginBottom: 4, fontSize: 12, color: "var(--ink-muted)" }}>
-                            Your name (so others know who reacted)
-                          </label>
-                          <input
-                            id="reaction-name"
-                            type="text"
-                            value={reactionAuthorName}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              setReactionAuthorName(v);
-                              if (typeof window !== "undefined") window.localStorage.setItem("lifebook_reaction_name", v);
-                            }}
-                            placeholder="e.g. Sarah, Dad"
-                            disabled={inlineCommentSending}
-                            style={{
-                              width: "100%",
-                              padding: "8px 10px",
-                              borderRadius: "var(--radius-sm)",
-                              border: "1px solid var(--border)",
-                              fontFamily: "inherit",
-                              fontSize: 14,
-                              marginBottom: 10,
-                            }}
-                          />
-                          <textarea
-                            value={inlineCommentText}
-                            onChange={(e) => setInlineCommentText(e.target.value)}
-                            placeholder="Write your reaction…"
-                            rows={3}
-                            disabled={inlineCommentSending}
-                            style={{
-                              width: "100%",
-                              padding: 10,
-                              borderRadius: "var(--radius-sm)",
-                              border: "1px solid var(--border)",
-                              fontFamily: "inherit",
-                              fontSize: 14,
-                              resize: "vertical",
-                              marginBottom: 6,
-                            }}
-                          />
-                          <button type="submit" className="btn btn-primary" style={{ fontSize: 13, alignSelf: "flex-start" }} disabled={inlineCommentSending || !inlineCommentText.trim()}>
-                            {inlineCommentSending ? "Sending…" : "Send reaction"}
-                          </button>
-                          {inlineCommentError && (
-                            <p role="alert" style={{ color: "var(--error)", fontSize: 12, margin: "4px 0 0" }}>{inlineCommentError}</p>
+                      {expandedMode === "view" && (
+                        <>
+                          <section style={{ marginBottom: 16 }} aria-label="Story content">
+                            <p style={{ margin: "0 0 4px", fontSize: 11, fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase" }}>Story</p>
+                            {s.summary?.trim() ? (
+                              <p style={{ margin: 0, fontSize: 14, color: "var(--ink)", whiteSpace: "pre-wrap" }}>
+                                {s.summary.trim()}
+                              </p>
+                            ) : (
+                              <p style={{ margin: 0, fontSize: 13, color: "var(--ink-muted)" }}>No story text.</p>
+                            )}
+                          </section>
+                          {s.reaction_log?.trim() && (
+                            <section style={{ marginBottom: 0 }} aria-label="Reactions">
+                              <p style={{ margin: "0 0 4px", fontSize: 11, fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase" }}>Reactions</p>
+                              <p style={{ margin: 0, fontSize: 13, color: "var(--ink-muted)", whiteSpace: "pre-wrap" }}>
+                                {s.reaction_log.trim()}
+                              </p>
+                            </section>
                           )}
-                        </form>
-                      </section>
+                        </>
+                      )}
+                      {expandedMode === "reaction" && (
+                        <section style={{ marginBottom: 0 }} aria-label="Reactions">
+                          <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase" }}>Reactions</p>
+                          {s.reaction_log?.trim() ? (
+                            <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--ink-muted)", whiteSpace: "pre-wrap" }}>
+                              {s.reaction_log.trim()}
+                            </p>
+                          ) : (
+                            <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--ink-muted)" }}>No reactions yet. Add one below.</p>
+                          )}
+                          <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase" }}>Add reaction</p>
+                          <form onSubmit={handleInlineAddComment} style={{ display: "flex", flexDirection: "column", gap: 0, maxWidth: 400 }}>
+                            <label htmlFor={`reaction-name-${s.id}`} style={{ marginBottom: 4, fontSize: 12, color: "var(--ink-muted)" }}>
+                              Your name (so others know who reacted)
+                            </label>
+                            <input
+                              id={`reaction-name-${s.id}`}
+                              type="text"
+                              value={reactionAuthorName}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setReactionAuthorName(v);
+                                if (typeof window !== "undefined") window.localStorage.setItem("lifebook_reaction_name", v);
+                              }}
+                              placeholder="e.g. Sarah, Dad"
+                              disabled={inlineCommentSending}
+                              className="input"
+                              style={{ width: "100%", marginBottom: 10 }}
+                            />
+                            <textarea
+                              value={inlineCommentText}
+                              onChange={(e) => setInlineCommentText(e.target.value)}
+                              placeholder="Write your reaction…"
+                              rows={3}
+                              disabled={inlineCommentSending}
+                              className="input"
+                              style={{ width: "100%", resize: "vertical", marginBottom: 8 }}
+                            />
+                            <button type="submit" className="btn btn-primary" style={{ fontSize: 13, alignSelf: "flex-start" }} disabled={inlineCommentSending || !inlineCommentText.trim()}>
+                              {inlineCommentSending ? "Sending…" : "Send reaction"}
+                            </button>
+                            {inlineCommentError && (
+                              <p role="alert" style={{ color: "var(--error)", fontSize: 12, margin: "4px 0 0" }}>{inlineCommentError}</p>
+                            )}
+                          </form>
+                        </section>
+                      )}
+                      {expandedMode === "edit" && editingStoryId === s.id && (
+                        <section style={{ marginBottom: 0 }} aria-label="Edit story">
+                          <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase" }}>Story</p>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            <textarea
+                              value={editingStoryText}
+                              onChange={(e) => setEditingStoryText(e.target.value)}
+                              rows={6}
+                              className="input"
+                              style={{ width: "100%", resize: "vertical" }}
+                              disabled={editingStorySaving}
+                              aria-label="Story text"
+                            />
+                            {editingStoryError && (
+                              <p role="alert" style={{ color: "var(--error)", fontSize: 12, margin: 0 }}>{editingStoryError}</p>
+                            )}
+                            <div className="action-row">
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                disabled={editingStorySaving}
+                                onClick={async () => {
+                                  setEditingStoryError(null);
+                                  setEditingStorySaving(true);
+                                  try {
+                                    await apiPatch(`/moments/${s.id}`, { summary: editingStoryText.trim() || null });
+                                    setEditingStoryId(null);
+                                    setEditingStoryText("");
+                                    setSharedStories((prev) =>
+                                      prev.map((x) => (x.id === s.id ? { ...x, summary: editingStoryText.trim() || null } : x))
+                                    );
+                                    setMoments((prev) =>
+                                      prev.map((m) => (m.id === s.id ? { ...m, summary: editingStoryText.trim() || null } : m))
+                                    );
+                                    refetchSharedStories();
+                                    setExpandedMode("view");
+                                  } catch (err) {
+                                    setEditingStoryError(err instanceof Error ? err.message : "Failed to update story");
+                                  } finally {
+                                    setEditingStorySaving(false);
+                                  }
+                                }}
+                              >
+                                {editingStorySaving ? "Saving…" : "Save"}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-ghost"
+                                disabled={editingStorySaving}
+                                onClick={() => {
+                                  setEditingStoryId(null);
+                                  setEditingStoryText("");
+                                  setEditingStoryError(null);
+                                  setExpandedMode("view");
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        </section>
+                      )}
                     </div>
                   )}
                 </li>

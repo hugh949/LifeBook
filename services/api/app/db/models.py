@@ -87,6 +87,7 @@ class Moment(Base):
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
     deleted_at = Column(DateTime(timezone=True), nullable=True)  # soft-delete for recall list
     shared_at = Column(DateTime(timezone=True), nullable=True)  # NULL = private; set when shared with family
+    reaction_log = Column(Text, nullable=True)  # Give Reaction comments (family feedback), separate from summary; not narrated
 
 
 class MomentAsset(Base):

@@ -58,7 +58,7 @@ export default async function MomentPage({ params }: { params: Promise<{ momentI
 
   return (
     <>
-      <article className="card" style={{ maxWidth: 640, padding: 0, overflow: "hidden" }}>
+      <article className="card moment-card">
         <div
           style={{
             width: "100%",

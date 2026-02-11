@@ -1,0 +1,52 @@
+# Daily database backup: pg_dump production DB and upload to Azure Blob.
+# Schedule: 2 AM UTC daily. Also run manually via Actions → Backup DB → Run workflow.
+#
+# Required secrets:
+#   DATABASE_URL                     - Production Postgres connection string
+#   AZURE_STORAGE_ACCOUNT            - Storage account for backup container
+#   AZURE_STORAGE_ACCOUNT_KEY        - Storage account key
+#
+# Optional (defaults):
+#   AZURE_STORAGE_BACKUP_CONTAINER   - Container name (default: lifebook-db-backups)
+#
+# Ensure the backup container exists (create once in Portal or: az storage container create -n lifebook-db-backups).
+
+name: Backup DB (scheduled)
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client and Azure CLI
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+
+      - name: Backup database and upload to blob
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          AZURE_STORAGE_ACCOUNT_KEY: ${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }}
+          AZURE_STORAGE_BACKUP_CONTAINER: ${{ vars.AZURE_STORAGE_BACKUP_CONTAINER || 'lifebook-db-backups' }}
+        run: |
+          set -e
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "DATABASE_URL secret is not set; skipping backup."
+            exit 0
+          fi
+          if [ -z "${AZURE_STORAGE_ACCOUNT:-}" ] || [ -z "${AZURE_STORAGE_ACCOUNT_KEY:-}" ]; then
+            echo "AZURE_STORAGE_ACCOUNT or AZURE_STORAGE_ACCOUNT_KEY not set; creating dump only (no upload)."
+          fi
+          ./scripts/backup-db.sh
