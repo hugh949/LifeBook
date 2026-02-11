@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -1139,11 +1140,12 @@ def delete_shared_story(
     body_id = (body.participant_id or "").strip().lower()
     if author_id != body_id:
         raise HTTPException(status_code=403, detail="Only the author can delete this story.")
+    author_pid = (moment.participant_id or "").strip()
     participant = (
         db.query(models.VoiceParticipant)
         .filter(
-            models.VoiceParticipant.id == moment.participant_id,
             models.VoiceParticipant.family_id == DEFAULT_FAMILY_ID,
+            func.lower(models.VoiceParticipant.id) == author_pid.lower(),
         )
         .first()
     )

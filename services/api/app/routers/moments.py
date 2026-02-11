@@ -99,8 +99,11 @@ def list_moments(
                 models.Moment.shared_at.is_(None),
             )
         else:
-            # default: shared only (backward compat for Memory Bank)
-            query = query.filter(models.Moment.shared_at.isnot(None))
+            # default: shared only (backward compat for Memory Bank); exclude soft-deleted
+            query = query.filter(
+                models.Moment.shared_at.isnot(None),
+                models.Moment.deleted_at.is_(None),
+            )
         if q:
             query = query.filter(
                 (models.Moment.title.ilike(f"%{q}%")) | (models.Moment.summary.ilike(f"%{q}%"))
