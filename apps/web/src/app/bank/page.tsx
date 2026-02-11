@@ -258,20 +258,20 @@ export default function BankPage() {
     const ttsBody = JSON.stringify({ text: text.trim() });
     const bgmBody = JSON.stringify({ moment_id: story.id, text: text.trim() });
     try {
-      // Fetch synthetic BGM and TTS in parallel (BGM may take 30-90s on first play)
-      const [bgmRes, narrateRes] = await Promise.all([
-        fetch(`${API_BASE}/voice/narrate/bgm`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: bgmBody,
-        }).then((r) => (r.ok ? r.json() : { url: null })).catch(() => ({ url: null })),
-        fetch(`${API_BASE}/voice/narrate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: ttsBody,
-        }),
-      ]);
-      const bgmUrl = bgmRes?.url && typeof bgmRes.url === "string" ? bgmRes.url.trim() : null;
+      // Start both fetches; start TTS playback as soon as narrate is ready (don't wait for BGM)
+      // so play() runs sooner and is less likely to be blocked by browser autoplay policy.
+      const bgmPromise = fetch(`${API_BASE}/voice/narrate/bgm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: bgmBody,
+      }).then((r) => (r.ok ? r.json() : { url: null })).catch(() => ({ url: null }));
+
+      const narrateRes = await fetch(`${API_BASE}/voice/narrate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: ttsBody,
+      });
+
       if (!narrateRes.ok) {
         const errBody = await narrateRes.text();
         let msg = narrateRes.statusText;
@@ -300,7 +300,15 @@ export default function BankPage() {
         setNarratingMomentId(null);
         setNarrateError("Narration playback failed. Try again.");
       };
-      // Synthetic BGM when available (unique per story; ignore load/play failures)
+      // Start narration as soon as TTS is ready (before BGM) to reduce chance of play() being blocked
+      await audio.play().catch((playErr) => {
+        cleanupNarrate();
+        setNarratingMomentId(null);
+        throw new Error(playErr?.message || "Playback was blocked. Tap Narrate again to listen.");
+      });
+      // Attach BGM when ready (may still be loading on first play)
+      const bgmRes = await bgmPromise;
+      const bgmUrl = bgmRes?.url && typeof bgmRes.url === "string" ? bgmRes.url.trim() : null;
       if (bgmUrl) {
         const bgm = new Audio(bgmUrl);
         narrateBgmRef.current = bgm;
@@ -309,11 +317,6 @@ export default function BankPage() {
         bgm.onerror = () => {};
         bgm.play().catch(() => {});
       }
-      await audio.play().catch((playErr) => {
-        cleanupNarrate();
-        setNarratingMomentId(null);
-        throw new Error(playErr?.message || "Playback was blocked. Tap Narrate again to listen.");
-      });
     } catch (err) {
       setNarrateError(err instanceof Error ? err.message : "Narration failed");
       setNarratingMomentId(null);
