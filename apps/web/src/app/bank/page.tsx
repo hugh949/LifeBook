@@ -824,18 +824,23 @@ export default function BankPage() {
                                     code: deleteCode,
                                   });
                                   const deletedId = s.id;
+                                  setDeleteSending(false);
                                   setDeleteStoryId(null);
                                   setDeleteCode("");
                                   setDeleteError(null);
-                                  // Remove from UI immediately so it disappears (don't wait for refetch)
-                                  setSharedStories((prev) => prev.filter((x) => x.id !== deletedId));
-                                  setMoments((prev) => prev.filter((m) => m.id !== deletedId));
                                   if (expandedVoiceId === deletedId) {
                                     setExpandedVoiceId(null);
                                     setExpandedMode(null);
                                   }
                                   if (playingMomentId === deletedId) setPlayingMomentId(null);
-                                  if (selectedMomentId === deletedId) setSelectedMomentId(null);
+                                  if (selectedMomentId === deletedId) {
+                                    setSelectedMomentId(null);
+                                    setPanelMoment(null);
+                                  }
+                                  setSharedStories((prev) => prev.filter((x) => x.id !== deletedId));
+                                  setMoments((prev) => prev.filter((m) => m.id !== deletedId));
+                                  refetchSharedStories();
+                                  apiGet<Moment[]>("/moments").then(setMoments).catch(() => {});
                                 } catch (err) {
                                   const msg = err instanceof Error ? err.message : "Delete failed.";
                                   setDeleteError(msg.includes("Incorrect") ? "Incorrect pass code. Use the same 4-digit code you use to unlock your recall stories in Talk." : msg);

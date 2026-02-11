@@ -23,8 +23,8 @@ NC='\033[0m'
 log() { echo "[release] $*"; }
 log_step() { echo ""; echo -e "${BOLD}[release] $*${NC}"; }
 
-# Require explicit "yes" (or "y"). Re-prompt until we get yes or no. Return 0 if yes, 1 if no.
-confirm_yes_no() {
+# Require explicit yes (y) or no (n). Re-prompt until we get one. Return 0 if yes, 1 if no.
+confirm_yn() {
   local prompt="$1"
   local reply
   while true; do
@@ -32,8 +32,19 @@ confirm_yes_no() {
     reply=$(echo "$reply" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
     if [[ "$reply" == "yes" || "$reply" == "y" ]]; then return 0; fi
     if [[ "$reply" == "no" || "$reply" == "n" ]]; then return 1; fi
-    echo "Please answer yes or no."
+    echo "Please answer y or n."
   done
+}
+
+# Legacy name for other steps that use longer prompts
+confirm_yes_no() { confirm_yn "$@"; }
+
+# Show DATABASE_URL with password masked (user:***@host)
+mask_db_url() {
+  local u="${1:-}"
+  if [[ -z "$u" ]]; then echo "(not set)"; return; fi
+  # Replace password (between : and @ after the scheme) with ***
+  echo "$u" | sed -e 's|://\([^:]*\):[^@]*@|://\1:***@|' 2>/dev/null || echo "(masked)"
 }
 
 # Check if production DB (DATABASE_URL) has pending Alembic migrations. Return 0 if pending, 1 if up to date or unable to check.
@@ -90,39 +101,63 @@ if ! "$REPO_ROOT/scripts/check-deploy-ready.sh" --require-clean; then
 fi
 log "Pre-release check passed."
 
-# Step 2: Back up production database (only if DATABASE_URL is set)
+# Step 2: Confirm or set DATABASE_URL (for backup and migrations)
+log_step "Step 2/7: Production database (backup and migrations)"
 if [ -n "${DATABASE_URL:-}" ]; then
-  log_step "Step 2/7: Production database backup"
-  log "DATABASE_URL is set. A backup is recommended before deploy so you can restore if needed."
-  if confirm_yes_no "Back up production database now? (yes/no)"; then
+  echo "  Current DATABASE_URL: $(mask_db_url "$DATABASE_URL")"
+  echo ""
+  if ! confirm_yn "Is this the correct production database? (y/n)"; then
+    read -r -p "Enter new DATABASE_URL (or press Enter to skip backup and migration): " new_url
+    if [[ -z "${new_url// /}" ]]; then
+      export DATABASE_URL=""
+      log "DATABASE_URL cleared. Skipping backup and migration prompts."
+    else
+      export DATABASE_URL="$new_url"
+      log "DATABASE_URL updated."
+    fi
+  fi
+else
+  if confirm_yn "DATABASE_URL is not set. Set it now for backup and migration? (y/n)"; then
+    read -r -p "Enter DATABASE_URL: " new_url
+    if [[ -n "${new_url// /}" ]]; then
+      export DATABASE_URL="$new_url"
+      log "DATABASE_URL set."
+    fi
+  else
+    log "Skipping backup and migration prompts."
+  fi
+fi
+
+# Step 2b: Back up production database (only if DATABASE_URL is set)
+if [ -n "${DATABASE_URL:-}" ]; then
+  log_step "Backup: production database"
+  log "Backup is recommended before deploy so you can restore if needed. Requires pg_dump (PostgreSQL client tools)."
+  if confirm_yn "Back up production database now? (y/n)"; then
     if "$REPO_ROOT/scripts/backup-db.sh"; then
       log "Backup completed."
     else
-      echo -e "${YELLOW}[release] Backup failed or skipped (e.g. pg_dump not found). Continue anyway?${NC}"
-      if ! confirm_yes_no "Continue with release without backup? (yes/no)"; then
+      echo -e "${YELLOW}[release] Backup failed (e.g. pg_dump not found). Install PostgreSQL client tools or run backup manually.${NC}"
+      if ! confirm_yn "Continue with release without backup? (y/n)"; then
         log "Release cancelled."
         exit 1
       fi
     fi
   else
-    log "Skipping backup. Ensure you have a recent backup or accept the risk."
+    log "Skipping backup."
   fi
-else
-  log_step "Step 2/7 & 3/7: Database (backup and migrations)"
-  log "DATABASE_URL not set; skipping backup and migration prompts. Set it to production Postgres URL to get these options."
 fi
 
 # Step 3: Pending migrations on production (only if DATABASE_URL is set)
 if [ -n "${DATABASE_URL:-}" ]; then
-  log_step "Step 3/7: Production database migrations"
+  log_step "Step 3/7: Migrations: production database"
   if check_pending_migrations; then
     current_rev=$(cd "$REPO_ROOT/services/api" && uv run alembic current 2>/dev/null | head -1)
     head_rev=$(cd "$REPO_ROOT/services/api" && uv run alembic heads 2>/dev/null | head -1)
     echo "  Current revision (on DB): $current_rev"
     echo "  Head revision (in code): $head_rev"
     echo ""
-    log "There are pending migrations. The deploy workflow will also run them; running now ensures DB is ready before new code goes live."
-    if confirm_yes_no "Run pending migrations on production database now? (yes/no)"; then
+    log "Pending migrations will also run in the Deploy workflow; running now ensures DB is ready before new code goes live."
+    if confirm_yn "Run pending migrations on production database now? (y/n)"; then
       if "$REPO_ROOT/scripts/prod-migrations.sh"; then
         log "Migrations completed."
       else
@@ -133,8 +168,10 @@ if [ -n "${DATABASE_URL:-}" ]; then
       log "Skipping. Migrations will run during the Deploy All workflow (if DATABASE_URL is in GitHub Secrets)."
     fi
   else
-    log "Database is up to date (no pending migrations) or migration check skipped."
+    log "Database is up to date (no pending migrations)."
   fi
+else
+  log "DATABASE_URL not set; migration check skipped."
 fi
 
 # Step 4: Version (always prompt for explicit choice or confirmation)
