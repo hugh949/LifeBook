@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Soft-delete all shared voice stories (Shared Memories) for the default family.
-Sets deleted_at on moments where source='voice_story' and shared_at is not null.
-Participants and other data are unchanged; only the Shared Memories list is cleared.
+Hard-delete all shared voice story moments (Shared Memories) for the default family.
+Removes rows in FK-safe order: SharedStoryListen, Transcript, MomentAsset, MomentPerson,
+unlinks VoiceStory (shared_moment_id=null, status=final), then deletes Moment rows.
+Participants and other data are unchanged.
 
-Use when: starting with a clean Shared Memories list (e.g. after fixing participant_id
-so new shares have correct author and delete works). Back up the database first if needed.
+Use when: starting with a clean Shared Memories list in production. Back up the DB first.
 
-Run from services/api with: uv run python scripts/clear_shared_memories.py --confirm
+Run from services/api with production DATABASE_URL:
+  DATABASE_URL='postgresql://...' uv run python scripts/clear_shared_memories.py --confirm
 """
 import argparse
 import sys
-from datetime import datetime, timezone
 
 from app.core.config import DEFAULT_FAMILY_ID
 from app.db.session import SessionLocal
@@ -19,27 +19,75 @@ from app.db import models
 
 
 def clear_shared_memories(db):
-    """Set deleted_at on all shared voice story moments (default family)."""
-    now = datetime.now(timezone.utc)
-    count = (
-        db.query(models.Moment)
-        .filter(
+    """Hard-delete all shared voice story moments (default family) and dependent rows."""
+    moment_ids = [
+        r[0]
+        for r in db.query(models.Moment.id).filter(
             models.Moment.family_id == DEFAULT_FAMILY_ID,
             models.Moment.source == "voice_story",
             models.Moment.shared_at.isnot(None),
-            models.Moment.deleted_at.is_(None),
-        )
-        .update(
-            {models.Moment.deleted_at: now},
-            synchronize_session=False,
-        )
-    )
-    return count
+        ).all()
+    ]
+    if not moment_ids:
+        print("  No shared voice story moments found.")
+        return 0
+
+    total = 0
+
+    # 1. shared_story_listens (references moments)
+    n = db.query(models.SharedStoryListen).filter(
+        models.SharedStoryListen.moment_id.in_(moment_ids)
+    ).delete(synchronize_session=False)
+    print(f"  shared_story_listens: {n}")
+    total += n
+
+    # 2. transcripts (references moments)
+    n = db.query(models.Transcript).filter(
+        models.Transcript.moment_id.in_(moment_ids)
+    ).delete(synchronize_session=False)
+    print(f"  transcripts: {n}")
+    total += n
+
+    # 3. moment_assets
+    n = db.query(models.MomentAsset).filter(
+        models.MomentAsset.moment_id.in_(moment_ids)
+    ).delete(synchronize_session=False)
+    print(f"  moment_assets: {n}")
+    total += n
+
+    # 4. moment_people
+    n = db.query(models.MomentPerson).filter(
+        models.MomentPerson.moment_id.in_(moment_ids)
+    ).delete(synchronize_session=False)
+    print(f"  moment_people: {n}")
+    total += n
+
+    # 5. Unlink voice_stories (set shared_moment_id=null, status=final so story stays in Recall)
+    stories = db.query(models.VoiceStory).filter(
+        models.VoiceStory.shared_moment_id.in_(moment_ids),
+        models.VoiceStory.family_id == DEFAULT_FAMILY_ID,
+    ).all()
+    for s in stories:
+        s.shared_moment_id = None
+        s.status = "final"
+        db.add(s)
+    print(f"  voice_stories unlinked: {len(stories)}")
+    total += len(stories)
+    db.flush()  # ensure UPDATE is applied before we delete moments (avoids FK violation)
+
+    # 6. Delete the moments
+    n = db.query(models.Moment).filter(
+        models.Moment.id.in_(moment_ids)
+    ).delete(synchronize_session=False)
+    print(f"  moments (hard-deleted): {n}")
+    total += n
+
+    return n
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Soft-delete all shared voice stories (Shared Memories) for the default family."
+        description="Hard-delete all shared voice stories (Shared Memories) for the default family."
     )
     parser.add_argument(
         "--confirm",
@@ -54,10 +102,10 @@ def main():
 
     db = SessionLocal()
     try:
-        print("Clearing shared memories (soft-delete) for default family...")
+        print("Hard-deleting shared memories for default family...")
         count = clear_shared_memories(db)
         db.commit()
-        print(f"Done. Soft-deleted {count} shared voice story moment(s).")
+        print(f"Done. Removed {count} shared voice story moment(s) and dependent rows.")
     except Exception as e:
         db.rollback()
         print(f"Error: {e}", file=sys.stderr)

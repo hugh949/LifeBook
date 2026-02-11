@@ -13,6 +13,7 @@ type Moment = {
   created_at?: string | null;
   thumbnail_url?: string | null;
   image_url?: string | null;
+  participant_id?: string | null;
 };
 
 type SharedStory = {
@@ -79,19 +80,38 @@ function isStubMediaUrl(url: string | null | undefined): boolean {
   return url.startsWith("https://local-mvp/") || url.startsWith("http://local-mvp/");
 }
 
+function getStoredParticipantId(): string | null {
+  try {
+    if (typeof window === "undefined") return null;
+    const stored = window.localStorage.getItem(PARTICIPANT_STORAGE_KEY);
+    return stored?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export default function BankPage() {
-  const { participantId } = useParticipantIdentity();
-  const [participantIdFromStorage, setParticipantIdFromStorage] = useState<string | null>(null);
+  const { participantId, participantLabel } = useParticipantIdentity();
+  const [participantIdFromStorage, setParticipantIdFromStorage] = useState<string | null>(getStoredParticipantId);
+  const readStoredParticipant = useCallback(() => {
+    setParticipantIdFromStorage(getStoredParticipantId());
+  }, []);
   useEffect(() => {
-    try {
-      const stored = typeof window !== "undefined" ? window.localStorage.getItem(PARTICIPANT_STORAGE_KEY) : null;
-      setParticipantIdFromStorage(stored?.trim() || null);
-    } catch {
-      setParticipantIdFromStorage(null);
-    }
-  }, [participantId]);
+    readStoredParticipant();
+  }, [participantId, readStoredParticipant]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onVisibility = () => readStoredParticipant();
+    window.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onVisibility);
+    return () => {
+      window.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onVisibility);
+    };
+  }, [readStoredParticipant]);
   const effectiveParticipantId = (participantId ?? participantIdFromStorage ?? "").trim() || null;
   const normalizedParticipantId = effectiveParticipantId;
+  const currentUserLabel = (participantLabel ?? "").trim() || null;
   const [moments, setMoments] = useState<Moment[]>([]);
   const [sharedStories, setSharedStories] = useState<SharedStory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -479,7 +499,7 @@ export default function BankPage() {
               id: m.id,
               title: m.title ?? null,
               summary: m.summary ?? null,
-              participant_id: null,
+              participant_id: m.participant_id ?? null,
               participant_name: "Someone",
               created_at: m.created_at ?? "",
               has_audio: true,
@@ -580,7 +600,11 @@ export default function BankPage() {
                         >
                           Give Reaction
                         </button>
-                        {normalizedParticipantId && s.participant_id && (s.participant_id.trim().toLowerCase() === normalizedParticipantId.toLowerCase()) && (
+                        {normalizedParticipantId && (() => {
+                          const matchById = s.participant_id && (s.participant_id.trim().toLowerCase() === normalizedParticipantId.toLowerCase());
+                          const matchByName = !s.participant_id && currentUserLabel && (s.participant_name?.trim() || "").toLowerCase() === currentUserLabel.toLowerCase();
+                          return matchById || matchByName;
+                        })() && (
                           <button
                             type="button"
                             className="btn btn-ghost"
