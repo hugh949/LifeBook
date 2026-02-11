@@ -980,6 +980,27 @@ def list_shared_stories(
     )
     if not moments:
         return []
+    # Backfill participant_id for legacy shared moments (so list and delete show correct author)
+    backfilled = False
+    for m in moments:
+        if m.participant_id is None:
+            story = (
+                db.query(models.VoiceStory)
+                .filter(
+                    models.VoiceStory.shared_moment_id == m.id,
+                    models.VoiceStory.family_id == DEFAULT_FAMILY_ID,
+                )
+                .first()
+            )
+            if story and story.participant_id:
+                m.participant_id = story.participant_id
+                db.add(m)
+                backfilled = True
+    if backfilled:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
     moment_ids = [str(m.id) for m in moments]
     # Listened set for this participant
     listened_set = set()
