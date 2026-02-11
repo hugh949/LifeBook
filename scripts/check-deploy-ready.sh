@@ -31,11 +31,11 @@ else
   ok=1
 fi
 
-# 2. Workflow: verify step must exist
-if grep -q 'Verify API source (delete route)' .github/workflows/deploy-api.yml 2>/dev/null; then
-  echo -e "${GREEN}✓${NC} deploy-api.yml: 'Verify API source (delete route)' step present"
+# 2. Workflow: verify step must exist (delete route + BGM)
+if grep -q 'Verify API source' .github/workflows/deploy-api.yml 2>/dev/null; then
+  echo -e "${GREEN}✓${NC} deploy-api.yml: Verify API source step present"
 else
-  echo -e "${RED}✗${NC} deploy-api.yml: Missing verify step for delete route"
+  echo -e "${RED}✗${NC} deploy-api.yml: Missing verify step for delete route / BGM"
   ok=1
 fi
 
