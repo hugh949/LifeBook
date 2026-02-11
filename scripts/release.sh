@@ -113,6 +113,17 @@ fi
 echo "Pushing to origin main..."
 git push -u origin main
 
+# Aggressive parity: ensure remote main is exactly our commit so the workflow builds this commit
+echo "Verifying push (origin/main must match HEAD)..."
+git fetch origin main
+OUR_HEAD=$(git rev-parse HEAD)
+ORIGIN_MAIN=$(git rev-parse origin/main)
+if [ "$OUR_HEAD" != "$ORIGIN_MAIN" ]; then
+  echo -e "${RED}ERROR: After push, origin/main ($ORIGIN_MAIN) is not our commit ($OUR_HEAD). Deploy would build the wrong code. Fix sync (e.g. pull --rebase, push) and run release again.${NC}"
+  exit 1
+fi
+echo -e "${GREEN}Push verified: origin/main = HEAD.${NC}"
+
 echo ""
 echo -e "${GREEN}Push complete. Triggering Deploy All (Web + API)...${NC}"
 PROD_WEB_URL="${PROD_WEB_URL:-https://app-lifebook-web-v1.azurewebsites.net}"

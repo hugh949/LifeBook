@@ -1,7 +1,7 @@
 # Deploy FastAPI (LifeBook API) to Azure Container Apps.
 # Trigger: only via Deploy All (workflow_call) or manual workflow_dispatch. No push trigger to avoid duplicate runs.
-# Builds Docker image from services/api, pushes to ACR, updates Container App.
-# Uses --cache-from previous image in ACR so base + pip layers are reused; only changed layers are pushed.
+# Builds Docker image from services/api with --no-cache and BUILD_SHA=${{ github.sha }}, pushes to ACR,
+# updates Container App, routes traffic to latest, then verifies production /health build_sha == github.sha.
 # All Azure resources must be in West US 3 (westus3).
 #
 # GitHub secrets (use ONE of these options):
@@ -14,6 +14,7 @@
 # Optional (synced to Container App on deploy; else set in Azure Portal):
 #   DATABASE_URL, AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_ACCOUNT_KEY, OPENAI_API_KEY, CORS_ALLOW_ORIGINS
 #   AZURE_STORAGE_CONTAINER_PHOTOS, AZURE_STORAGE_CONTAINER_AUDIO
+#   ELEVENLABS_API_KEY (Narrate Story BGM; if unset, narration plays without music)
 #   PICOVOICE_ACCESS_KEY, VOICE_ID_BACKEND (Voice ID, default Eagle), or AZURE_SPEECH_KEY, AZURE_SPEECH_REGION, AZURE_SPEECH_ENDPOINT (Voice ID when backend=azure)
 #
 # GitHub variables (or set in workflow):
@@ -147,7 +148,7 @@ jobs:
           fi
           echo "==> API infrastructure check complete."
 
-      - name: Verify API source (delete route)
+      - name: Verify API source (delete route + BGM)
         run: |
           echo "==> Building from commit ${{ github.sha }}"
           if ! grep -q '"/stories/shared/delete"' services/api/app/routers/voice.py; then
@@ -155,6 +156,15 @@ jobs:
             exit 1
           fi
           echo "==> Delete route present in source."
+          if ! grep -q 'narrate/bgm' services/api/app/routers/voice.py; then
+            echo "==> ERROR: voice.py does not contain narrate/bgm route. Check commit and workflow ref."
+            exit 1
+          fi
+          if ! grep -q 'elevenlabs' services/api/app/services/music_generation.py; then
+            echo "==> ERROR: music_generation.py does not contain ElevenLabs BGM code. Check commit and workflow ref."
+            exit 1
+          fi
+          echo "==> BGM (narrate/bgm + ElevenLabs) present in source."
 
       - name: Login to ACR
         run: |
@@ -226,6 +236,7 @@ jobs:
           CORS_ALLOW_ORIGINS: ${{ secrets.CORS_ALLOW_ORIGINS }}
           AZURE_STORAGE_CONTAINER_PHOTOS: ${{ secrets.AZURE_STORAGE_CONTAINER_PHOTOS }}
           AZURE_STORAGE_CONTAINER_AUDIO: ${{ secrets.AZURE_STORAGE_CONTAINER_AUDIO }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           PICOVOICE_ACCESS_KEY: ${{ secrets.PICOVOICE_ACCESS_KEY }}
           VOICE_ID_BACKEND: ${{ vars.VOICE_ID_BACKEND || secrets.VOICE_ID_BACKEND || 'eagle' }}
           AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
@@ -242,6 +253,7 @@ jobs:
           [ -n "$CORS_ALLOW_ORIGINS" ] && echo "  CORS_ALLOW_ORIGINS: set" || echo "  CORS_ALLOW_ORIGINS: (empty)"
           [ -n "$AZURE_STORAGE_CONTAINER_PHOTOS" ] && echo "  AZURE_STORAGE_CONTAINER_PHOTOS: set" || echo "  AZURE_STORAGE_CONTAINER_PHOTOS: (empty, will use default photos)"
           [ -n "$AZURE_STORAGE_CONTAINER_AUDIO" ] && echo "  AZURE_STORAGE_CONTAINER_AUDIO: set" || echo "  AZURE_STORAGE_CONTAINER_AUDIO: (empty, will use default audio)"
+          [ -n "$ELEVENLABS_API_KEY" ] && echo "  ELEVENLABS_API_KEY: set" || echo "  ELEVENLABS_API_KEY: (empty — BGM will be disabled in production)"
           [ -n "$PICOVOICE_ACCESS_KEY" ] && echo "  PICOVOICE_ACCESS_KEY: set" || echo "  PICOVOICE_ACCESS_KEY: (empty, Voice ID disabled when backend=eagle)"
           [ -n "$VOICE_ID_BACKEND" ] && echo "  VOICE_ID_BACKEND: $VOICE_ID_BACKEND" || echo "  VOICE_ID_BACKEND: (empty, default eagle)"
           [ -n "$AZURE_SPEECH_KEY" ] && echo "  AZURE_SPEECH_KEY: set" || echo "  AZURE_SPEECH_KEY: (empty)"
@@ -259,6 +271,7 @@ jobs:
           [ -n "$CORS_ALLOW_ORIGINS" ] && ENV_VARS+=( "CORS_ALLOW_ORIGINS=$CORS_ALLOW_ORIGINS" )
           [ -n "$AZURE_STORAGE_CONTAINER_PHOTOS" ] && ENV_VARS+=( "AZURE_STORAGE_CONTAINER_PHOTOS=$AZURE_STORAGE_CONTAINER_PHOTOS" )
           [ -n "$AZURE_STORAGE_CONTAINER_AUDIO" ] && ENV_VARS+=( "AZURE_STORAGE_CONTAINER_AUDIO=$AZURE_STORAGE_CONTAINER_AUDIO" )
+          [ -n "$ELEVENLABS_API_KEY" ] && ENV_VARS+=( "ELEVENLABS_API_KEY=$ELEVENLABS_API_KEY" )
           [ -n "$PICOVOICE_ACCESS_KEY" ] && ENV_VARS+=( "PICOVOICE_ACCESS_KEY=$PICOVOICE_ACCESS_KEY" )
           [ -n "$VOICE_ID_BACKEND" ] && ENV_VARS+=( "VOICE_ID_BACKEND=$VOICE_ID_BACKEND" )
           [ -n "$AZURE_SPEECH_KEY" ] && ENV_VARS+=( "AZURE_SPEECH_KEY=$AZURE_SPEECH_KEY" )
@@ -286,3 +299,34 @@ jobs:
           cat /tmp/az-update.log
           echo "==> If this persists, restart the Container App in Azure Portal and re-run the workflow."
           exit 1
+
+      - name: Verify production image (build_sha must match commit)
+        run: |
+          set -e
+          echo "==> Verifying production is serving the exact image we built (build_sha == ${{ github.sha }})..."
+          RG="${{ env.RESOURCE_GROUP }}"
+          APP="${{ env.CONTAINER_APP }}"
+          FQDN=$(az containerapp show -g "$RG" -n "$APP" --query "properties.configuration.ingress.fqdn" -o tsv)
+          HEALTH_URL="https://${FQDN}/health"
+          echo "==> Production API health: $HEALTH_URL"
+          echo "==> Waiting 75s for new revision to be serving (cold start)..."
+          sleep 75
+          BUILD_SHA=""
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            resp=$(curl -s --max-time 30 "$HEALTH_URL" || true)
+            BUILD_SHA=$(echo "$resp" | sed -n 's/.*"build_sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+            if [ -n "$BUILD_SHA" ]; then
+              break
+            fi
+            echo "==> Attempt $attempt/10: no build_sha in response yet. Waiting 15s..."
+            sleep 15
+          done
+          if [ -z "$BUILD_SHA" ]; then
+            echo "==> ERROR: Production /health did not return build_sha after 10 attempts. Response may be from an old image or health endpoint changed."
+            exit 1
+          fi
+          if [ "$BUILD_SHA" != "${{ github.sha }}" ]; then
+            echo "==> ERROR: Image mismatch. Production build_sha=$BUILD_SHA but we built commit ${{ github.sha }}. Traffic may still be on an old revision, or a different image is deployed."
+            exit 1
+          fi
+          echo "==> Verified: production is serving image from commit $BUILD_SHA"

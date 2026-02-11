@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Verify production (web proxy + API health + optional version).
+# Verify production (web proxy + API health + optional version + optional API image).
 # Usage:
 #   PROD_WEB_URL=https://app-lifebook-web-v1.azurewebsites.net ./scripts/verify-prod.sh
 #   EXPECTED_VERSION=1.1 PROD_WEB_URL=... ./scripts/verify-prod.sh   # also check deployed version
+#   EXPECTED_BUILD_SHA=<git-sha> PROD_WEB_URL=... ./scripts/verify-prod.sh   # API must be built from this commit
 #
 # API_UPSTREAM (on the Web App): must be the API base URL only, no path.
 #   Correct:   https://your-api.azurecontainerapps.io
@@ -42,6 +43,23 @@ if [[ "$code" != "200" ]]; then
   ok=1
 else
   echo "  OK (200)"
+fi
+
+# Optional: check API image build_sha (production must be running image from this commit)
+if [[ -n "${EXPECTED_BUILD_SHA:-}" ]] && [[ -f /tmp/verify-prod-health.json ]]; then
+  deployed_sha=$(sed -n 's/.*"build_sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /tmp/verify-prod-health.json)
+  if [[ -z "$deployed_sha" ]]; then
+    echo "→ API build_sha (expected $EXPECTED_BUILD_SHA)"
+    echo "  FAIL: /health did not return build_sha (old API image?)"
+    ok=1
+  elif [[ "$deployed_sha" != "$EXPECTED_BUILD_SHA" ]]; then
+    echo "→ API build_sha (expected $EXPECTED_BUILD_SHA)"
+    echo "  FAIL: API is running image from $deployed_sha, not $EXPECTED_BUILD_SHA"
+    ok=1
+  else
+    echo "→ API build_sha"
+    echo "  OK (matches $EXPECTED_BUILD_SHA)"
+  fi
 fi
 
 echo "→ GET $DELETE_ENDPOINT_CHECK (delete route exists?)"

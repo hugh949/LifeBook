@@ -1,6 +1,19 @@
 # Reliable release checklist — avoid production-only errors
 
-Use this so **only committed code** is deployed and production matches what you tested locally. Past issues (uncommitted code, wrong checkout ref, traffic on old revision) are prevented by the steps below.
+Use this so **only committed code** is deployed and production runs the **exact same image** you built. Past issues (uncommitted code, wrong checkout ref, stale Docker cache, traffic on old revision, missing secrets) are guarded by the steps below.
+
+---
+
+## Aggressive parity (code + image)
+
+To maximize confidence that production matches local:
+
+1. **Commit** — Nothing is deployable until committed. `release.sh` runs `check-deploy-ready.sh --require-clean` and **fails** if there are uncommitted changes.
+2. **Push** — After `git push`, the release script **verifies** that `origin/main` equals your local `HEAD`. If not, the script exits so you don’t trigger a deploy from the wrong commit.
+3. **Build** — The deploy workflow checks out **the commit that triggered the run** (`ref: ${{ github.sha }}`), builds the Docker image with **`--no-cache`** and **`BUILD_SHA=${{ github.sha }}`** baked into the image, and has a **source verification** step that greps for critical routes (delete, narrate/bgm, ElevenLabs) so the build fails if that code is missing.
+4. **Deploy** — After updating the Container App, the workflow **routes 100% traffic to the latest revision** and then **verifies** that production `/health` returns `build_sha` equal to `github.sha`. If the running API reports a different commit, the workflow **fails**.
+
+So: same commit → same build → same image → verified at runtime. If any step fails, fix it before considering the release done.
 
 ---
 
@@ -86,7 +99,7 @@ If you added or use features that need new keys, add those **same keys** to prod
 |--------|----------|----------------------------|
 | `OPENAI_API_KEY` | Talk, Narrate TTS, music prompt | Container App (API) / GitHub secret |
 | `OPENAI_TEXT_MODEL` | Optional model override | Container App (API) |
-| `ELEVENLABS_API_KEY` | Narrate Story BGM (ElevenLabs Music) | Container App (API) / GitHub secret |
+| `ELEVENLABS_API_KEY` | Narrate Story BGM (ElevenLabs Music) | **Must be in GitHub Secrets** and is passed by deploy-api workflow to the Container App. If missing, BGM returns `url: null` in production. |
 | `PICOVOICE_ACCESS_KEY` | Voice ID (Eagle) | Container App (API) |
 | `AZURE_STORAGE_ACCOUNT` / `AZURE_STORAGE_ACCOUNT_KEY` | Uploads, photos, BGM storage | Container App (API) |
 | `DATABASE_URL` | Postgres | Container App (API) / GitHub secret |

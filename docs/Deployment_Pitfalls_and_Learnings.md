@@ -13,7 +13,8 @@
 | Image had old code despite correct commit | Docker layer cache served stale `COPY app` | Build with `--no-cache`; add `BUILD_SHA` arg |
 | New revisions deployed but 404 persisted | **Traffic stayed on old revision** (100% to revision 0000024) | Run `az containerapp ingress traffic set --revision-weight latest=100` after deploy |
 | Verify script reported 000 (timeout) | 30s too short for cold starts | Increase timeout to 60s (configurable via `VERIFY_TIMEOUT`) |
-| Uncommitted changes left out of deploy | Easy to forget to commit | Release script prompts strongly; pre-release check warns |
+| Uncommitted changes left out of deploy | Easy to forget to commit | Release script requires clean repo (`check-deploy-ready.sh --require-clean`) |
+| BGM works locally but not in production | `ELEVENLABS_API_KEY` not set in production | Add **ELEVENLABS_API_KEY** to GitHub Secrets; deploy-api workflow must pass it to Container App (see workflow env + ENV_VARS) |
 
 ---
 
@@ -199,15 +200,28 @@ If direct works but proxy fails, the issue is in the proxy or `API_UPSTREAM`. If
 
 ---
 
-## 8. Checklist for Future Deployments
+## 8. Aggressive parity (code + image)
+
+To ensure production runs the exact same code/image as the build:
+
+- **Release script:** After `git push`, verifies `origin/main == HEAD`; exits if not (so the workflow will build the right commit).
+- **Deploy workflow:** Checkout pins `ref: ${{ github.sha }}`; build uses `--no-cache` and `BUILD_SHA=${{ github.sha }}`; source step greps for delete route and BGM (narrate/bgm + ElevenLabs); after deploy, a step verifies production `/health` returns `build_sha == github.sha` (fail if mismatch).
+- **API /health:** Returns `build_sha` from the image (baked at build time from `BUILD_SHA`). Used by the workflow and by `verify-prod.sh` with `EXPECTED_BUILD_SHA`.
+
+Optional local check:  
+`EXPECTED_BUILD_SHA=<commit-sha> PROD_WEB_URL=... ./scripts/verify-prod.sh` to confirm the API in production is from that commit.
+
+---
+
+## 9. Checklist for Future Deployments
 
 Before releasing:
 
-1. Run `./scripts/check-deploy-ready.sh` — fix any failures.
-2. Commit all changes; release script will prompt if you forget.
+1. Run `./scripts/check-deploy-ready.sh --require-clean` (or let `release.sh` do it) — fix any failures.
+2. Commit all changes; release script **fails** if anything is uncommitted.
 3. Run `./scripts/release.sh` (or trigger Deploy All manually).
-4. Wait for workflow to complete (both Web and API jobs green).
-5. Run `./scripts/verify-prod.sh` — all checks should pass.
+4. Wait for workflow to complete (both Web and API jobs green). The API job **fails** if production `build_sha` ≠ commit.
+5. Run `./scripts/verify-prod.sh` — all checks should pass. Optionally `EXPECTED_BUILD_SHA=<sha> PROD_WEB_URL=... ./scripts/verify-prod.sh`.
 6. If a new API route still 404s:
    - Check traffic: `az containerapp ingress show` and `revision list`
    - Route traffic to latest: `az containerapp ingress traffic set --revision-weight latest=100`
