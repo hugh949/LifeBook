@@ -660,7 +660,8 @@ export default function BankPage() {
                                 setDeleteSending(true);
                                 setDeleteError(null);
                                 try {
-                                  await apiPost<{ deleted: boolean }>(`/voice/stories/shared/${s.id}/delete`, {
+                                  await apiPost<{ deleted: boolean }>("/voice/stories/shared/delete", {
+                                    moment_id: s.id,
                                     participant_id: normalizedParticipantId,
                                     code: deleteCode,
                                   });

@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -1116,13 +1115,15 @@ class DeleteSharedStoryBody(BaseModel):
     code: str  # 4-digit recall PIN
 
 
-@router.post("/stories/shared/{moment_id}/delete")
-def delete_shared_story(
-    moment_id: str,
-    body: DeleteSharedStoryBody,
-    db: Session = Depends(get_db),
-):
-    """Delete a shared story. Only the author can delete; requires their recall pass code."""
+class DeleteSharedStoryBodyWithMomentId(BaseModel):
+    """Same as DeleteSharedStoryBody but moment_id in body (avoids path-encoding issues on some proxies)."""
+    moment_id: str
+    participant_id: str
+    code: str
+
+
+def _delete_shared_story_impl(moment_id: str, body: DeleteSharedStoryBody, db: Session):
+    """Shared implementation for delete (path or body moment_id)."""
     moment = (
         db.query(models.Moment)
         .filter(
@@ -1135,7 +1136,10 @@ def delete_shared_story(
         .first()
     )
     if not moment:
-        raise HTTPException(status_code=404, detail="Shared story not found.")
+        raise HTTPException(
+            status_code=404,
+            detail="Shared story not found. The story may have been deleted or the link is invalid.",
+        )
     # Resolve author id: moment may have it, or get from linked VoiceStory (backfill may not have run)
     author_pid = (str(moment.participant_id or "") or "").strip()
     if not author_pid:
@@ -1146,37 +1150,33 @@ def delete_shared_story(
                 models.VoiceStory.family_id == DEFAULT_FAMILY_ID,
             )
             .first()
-            )
+        )
         if story and story.participant_id:
             author_pid = (str(story.participant_id) or "").strip()
     author_id = author_pid.lower() if author_pid else ""
-    body_id = (body.participant_id or "").strip().lower()
+    body_id_raw = (body.participant_id or "").strip()
+    body_id = body_id_raw.lower()
     if not body_id:
         raise HTTPException(status_code=400, detail="participant_id is required.")
     if author_id != body_id:
         raise HTTPException(status_code=403, detail="Only the author can delete this story.")
-    # Look up participant (case-insensitive); try author_pid first, then body.participant_id as fallback for Azure/Postgres casing
+    # Resolve participant in Python so DB/collation quirks (e.g. Azure Postgres) cannot cause 404
+    all_participants = (
+        db.query(models.VoiceParticipant)
+        .filter(models.VoiceParticipant.family_id == DEFAULT_FAMILY_ID)
+        .all()
+    )
     participant = None
-    if author_pid:
-        participant = (
-            db.query(models.VoiceParticipant)
-            .filter(
-                models.VoiceParticipant.family_id == DEFAULT_FAMILY_ID,
-                func.lower(models.VoiceParticipant.id) == author_pid.lower(),
-            )
-            .first()
-        )
+    for p in all_participants:
+        pid = (str(getattr(p, "id", "") or "")).strip().lower()
+        if pid == body_id or (author_pid and pid == author_pid.lower()):
+            participant = p
+            break
     if not participant:
-        participant = (
-            db.query(models.VoiceParticipant)
-            .filter(
-                models.VoiceParticipant.family_id == DEFAULT_FAMILY_ID,
-                func.lower(models.VoiceParticipant.id) == body_id,
-            )
-            .first()
+        raise HTTPException(
+            status_code=400,
+            detail="Participant not found. Make sure you are signed in as the story author (choose your name in the top bar).",
         )
-    if not participant:
-        raise HTTPException(status_code=404, detail="Participant not found.")
     stored = (getattr(participant, "recall_passphrase", None) or "").strip()
     if not stored or len(stored) != 64:
         raise HTTPException(status_code=400, detail="No recall code set for this participant.")
@@ -1191,6 +1191,28 @@ def delete_shared_story(
     db.commit()
     logger.info("voice/stories: deleted shared story moment_id=%s participant_id=%s", moment_id, body.participant_id)
     return {"deleted": True}
+
+
+@router.post("/stories/shared/delete")
+def delete_shared_story_by_body(
+    body: DeleteSharedStoryBodyWithMomentId,
+    db: Session = Depends(get_db),
+):
+    """Delete a shared story (moment_id in body). Preferred to avoid path-encoding issues on proxies."""
+    mid = (body.moment_id or "").strip()
+    if not mid:
+        raise HTTPException(status_code=400, detail="moment_id is required.")
+    return _delete_shared_story_impl(mid, DeleteSharedStoryBody(participant_id=body.participant_id, code=body.code), db)
+
+
+@router.post("/stories/shared/{moment_id}/delete")
+def delete_shared_story(
+    moment_id: str,
+    body: DeleteSharedStoryBody,
+    db: Session = Depends(get_db),
+):
+    """Delete a shared story (moment_id in path). Only the author can delete; requires recall pass code."""
+    return _delete_shared_story_impl(moment_id, body, db)
 
 
 # OpenAI TTS: same voice as realtime agent (alloy) for Narrate Story
