@@ -172,14 +172,9 @@ jobs:
           IMAGE="${REGISTRY}/lifebook-api:${{ github.sha }}"
           IMAGE_LATEST="${REGISTRY}/lifebook-api:latest"
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
-          CACHE_FROM=""
-          if docker pull "$IMAGE_LATEST" 2>/dev/null; then
-            echo "==> Using cache from $IMAGE_LATEST"
-            CACHE_FROM="--cache-from $IMAGE_LATEST"
-          else
-            echo "==> No previous image for cache; building from scratch."
-          fi
-          docker build $CACHE_FROM --build-arg BUILD_SHA=${{ github.sha }} -t "$IMAGE" ./services/api
+          # Use --no-cache to avoid stale COPY app layers (production had 404 on delete route
+          # despite correct commit; cached layers may have served old code).
+          docker build --no-cache --build-arg BUILD_SHA=${{ github.sha }} -t "$IMAGE" ./services/api
           echo "==> Docker build finished. Image: $IMAGE"
 
       - name: Push image to ACR
