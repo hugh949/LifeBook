@@ -8,6 +8,9 @@ COPY pyproject.toml /app/pyproject.toml
 
 RUN pip install --no-cache-dir -U pip && pip install --no-cache-dir .
 
+# BUILD_SHA from CI (e.g. github.sha) so this layer is unique per commit and not served from stale cache
+ARG BUILD_SHA
+RUN echo "${BUILD_SHA:-none}" > /app/.build_sha
 COPY app /app/app
 COPY scripts /app/scripts
 COPY alembic.ini /app/alembic.ini

@@ -1193,6 +1193,12 @@ def _delete_shared_story_impl(moment_id: str, body: DeleteSharedStoryBody, db: S
     return {"deleted": True}
 
 
+@router.get("/stories/shared/delete")
+def delete_shared_story_get():
+    """Diagnostic: GET returns 200 if the delete route exists. Use POST with body {moment_id, participant_id, code} to delete."""
+    return {"delete_endpoint": True, "method": "POST with body: moment_id, participant_id, code"}
+
+
 @router.post("/stories/shared/delete")
 def delete_shared_story_by_body(
     body: DeleteSharedStoryBodyWithMomentId,

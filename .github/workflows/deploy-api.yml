@@ -45,6 +45,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Pin to the commit that triggered this deploy (required when called via workflow_call:
+          # otherwise checkout may use branch tip instead of trigger commit, so API can deploy stale code).
+          ref: ${{ github.sha }}
 
       - name: Prepare Azure credentials
         id: azcreds
@@ -143,6 +147,15 @@ jobs:
           fi
           echo "==> API infrastructure check complete."
 
+      - name: Verify API source (delete route)
+        run: |
+          echo "==> Building from commit ${{ github.sha }}"
+          if ! grep -q '"/stories/shared/delete"' services/api/app/routers/voice.py; then
+            echo "==> ERROR: services/api/app/routers/voice.py does not contain the delete route. Check commit and workflow ref."
+            exit 1
+          fi
+          echo "==> Delete route present in source."
+
       - name: Login to ACR
         run: |
           echo "==> Logging in to ACR ${{ env.ACR_NAME }}..."
@@ -166,7 +179,7 @@ jobs:
           else
             echo "==> No previous image for cache; building from scratch."
           fi
-          docker build $CACHE_FROM -t "$IMAGE" ./services/api
+          docker build $CACHE_FROM --build-arg BUILD_SHA=${{ github.sha }} -t "$IMAGE" ./services/api
           echo "==> Docker build finished. Image: $IMAGE"
 
       - name: Push image to ACR
