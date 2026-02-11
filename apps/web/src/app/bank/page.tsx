@@ -158,6 +158,10 @@ export default function BankPage() {
   const narrateAudioRef = useRef<HTMLAudioElement | null>(null);
   const narrateUrlRef = useRef<string | null>(null);
   const narrateBgmRef = useRef<HTMLAudioElement | null>(null);
+  /** When TTS is ready but user has not tapped play yet (avoids autoplay block). */
+  const [showTapToPlay, setShowTapToPlay] = useState(false);
+  const narratePendingBgmUrlRef = useRef<string | null>(null);
+  const NARRATE_FETCH_TIMEOUT_MS = 120000;
   /** Shared Memories view: voice (default) | photos | videos */
   const [bankView, setBankView] = useState<"voice" | "photos" | "videos">("voice");
 
@@ -251,26 +255,46 @@ export default function BankPage() {
   async function narrateStory(story: SharedStory) {
     const text = (story.summary?.trim() || story.title?.trim() || "No content to read.").slice(0, 4096);
     if (!text.trim()) return;
+    if (typeof window !== "undefined") {
+      console.log("[narrate] narrateStory called", { storyId: story.id, textLen: text.length });
+    }
     stopNarrate();
     setNarrateError(null);
     setNarrateLoading(true);
     setNarratingMomentId(story.id);
     const ttsBody = JSON.stringify({ text: text.trim() });
     const bgmBody = JSON.stringify({ moment_id: story.id, text: text.trim() });
+    const abort = new AbortController();
+    const timeoutId = setTimeout(() => abort.abort(), NARRATE_FETCH_TIMEOUT_MS);
     try {
-      // Start both fetches; start TTS playback as soon as narrate is ready (don't wait for BGM)
-      // so play() runs sooner and is less likely to be blocked by browser autoplay policy.
       const bgmPromise = fetch(`${API_BASE}/voice/narrate/bgm`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: bgmBody,
-      }).then((r) => (r.ok ? r.json() : { url: null })).catch(() => ({ url: null }));
+      })
+        .then((r) => {
+          if (typeof window !== "undefined") {
+            console.log("[narrate] BGM fetch completed", { status: r.status, ok: r.ok });
+          }
+          return r.ok ? r.json() : { url: null };
+        })
+        .catch((e) => {
+          if (typeof window !== "undefined") console.warn("[narrate] BGM fetch failed", e);
+          return { url: null };
+        });
 
+      if (typeof window !== "undefined") console.log("[narrate] TTS fetch starting");
       const narrateRes = await fetch(`${API_BASE}/voice/narrate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: ttsBody,
+        signal: abort.signal,
       });
+      clearTimeout(timeoutId);
+
+      if (typeof window !== "undefined") {
+        console.log("[narrate] TTS fetch completed", { status: narrateRes.status, ok: narrateRes.ok });
+      }
 
       if (!narrateRes.ok) {
         const errBody = await narrateRes.text();
@@ -284,6 +308,9 @@ export default function BankPage() {
         throw new Error(msg);
       }
       const blob = await narrateRes.blob();
+      if (typeof window !== "undefined") {
+        console.log("[narrate] TTS blob received", { size: blob.size });
+      }
       if (!blob.size) {
         throw new Error("No audio received. Try again.");
       }
@@ -294,38 +321,69 @@ export default function BankPage() {
       audio.onended = () => {
         cleanupNarrate();
         setNarratingMomentId(null);
+        setShowTapToPlay(false);
       };
       audio.onerror = () => {
         cleanupNarrate();
         setNarratingMomentId(null);
+        setShowTapToPlay(false);
         setNarrateError("Narration playback failed. Try again.");
       };
-      // Start narration as soon as TTS is ready (before BGM) to reduce chance of play() being blocked
-      await audio.play().catch((playErr) => {
-        cleanupNarrate();
-        setNarratingMomentId(null);
-        throw new Error(playErr?.message || "Playback was blocked. Tap Narrate again to listen.");
-      });
-      // Attach BGM when ready (may still be loading on first play)
+      // Wait for BGM so we have it when user taps play
       const bgmRes = await bgmPromise;
       const bgmUrl = bgmRes?.url && typeof bgmRes.url === "string" ? bgmRes.url.trim() : null;
-      if (bgmUrl) {
-        const bgm = new Audio(bgmUrl);
-        narrateBgmRef.current = bgm;
-        bgm.volume = 0.2;
-        bgm.loop = true;
-        bgm.onerror = () => {};
-        bgm.play().catch(() => {});
+      narratePendingBgmUrlRef.current = bgmUrl;
+      if (typeof window !== "undefined") {
+        console.log("[narrate] Ready for tap-to-play", { hasBgm: !!bgmUrl });
       }
+      // Show "Tap to play" instead of calling play() so a fresh user gesture starts playback (avoids autoplay block)
+      setShowTapToPlay(true);
     } catch (err) {
-      setNarrateError(err instanceof Error ? err.message : "Narration failed");
+      if (err instanceof Error && err.name === "AbortError") {
+        setNarrateError("Narration request timed out. Try again.");
+      } else {
+        setNarrateError(err instanceof Error ? err.message : "Narration failed");
+      }
       setNarratingMomentId(null);
+      setShowTapToPlay(false);
+      if (typeof window !== "undefined") console.warn("[narrate] error", err);
     } finally {
       setNarrateLoading(false);
     }
   }
 
+  /** Called when user taps "Tap to play narration" (fresh gesture so play() is allowed). */
+  function handleTapToPlayNarrate() {
+    const audio = narrateAudioRef.current;
+    if (!audio) return;
+    if (typeof window !== "undefined") console.log("[narrate] play() called (tap to play)");
+    setShowTapToPlay(false);
+    audio
+      .play()
+      .then(() => {
+        if (typeof window !== "undefined") console.log("[narrate] play() resolved");
+        const bgmUrl = narratePendingBgmUrlRef.current;
+        if (bgmUrl) {
+          const bgm = new Audio(bgmUrl);
+          narrateBgmRef.current = bgm;
+          bgm.volume = 0.2;
+          bgm.loop = true;
+          bgm.onerror = () => {};
+          bgm.play().catch(() => {});
+        }
+        narratePendingBgmUrlRef.current = null;
+      })
+      .catch((playErr) => {
+        if (typeof window !== "undefined") console.warn("[narrate] play() rejected", playErr);
+        cleanupNarrate();
+        setNarratingMomentId(null);
+        setNarrateError(playErr?.message || "Playback was blocked. Tap Narrate again to listen.");
+      });
+  }
+
   function cleanupNarrate() {
+    setShowTapToPlay(false);
+    narratePendingBgmUrlRef.current = null;
     const url = narrateUrlRef.current;
     if (url) {
       URL.revokeObjectURL(url);
@@ -780,6 +838,18 @@ export default function BankPage() {
                         )}
                         {narrateError && expandedVoiceId === s.id && (
                           <p role="alert" style={{ color: "var(--error)", fontSize: 12, margin: "0 0 8px" }}>{narrateError}</p>
+                        )}
+                        {showTapToPlay && narratingMomentId === s.id && expandedVoiceId === s.id && (
+                          <p style={{ margin: "0 0 8px" }}>
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              onClick={handleTapToPlayNarrate}
+                              aria-label="Tap to play narration"
+                            >
+                              Tap to play narration
+                            </button>
+                          </p>
                         )}
                         {s.has_audio && expandedPlaybackUrl && (
                           <p style={{ margin: "0 0 4px", fontSize: 11, color: "var(--ink-muted)" }}>Original recording:</p>
