@@ -272,7 +272,9 @@ jobs:
           echo "==> Running az containerapp update (retries: 12, 45s apart if busy)..."
           for attempt in $(seq 1 12); do
             if az containerapp update "${UPDATE_ARGS[@]}" > /tmp/az-update.log 2>&1; then
-              echo "==> Deploy successful."
+              echo "==> Deploy successful. Routing 100% traffic to latest revision..."
+              az containerapp ingress traffic set --name ${{ env.CONTAINER_APP }} --resource-group ${{ env.RESOURCE_GROUP }} --revision-weight latest=100 --output none 2>/dev/null || true
+              echo "==> Done."
               exit 0
             fi
             echo "==> Attempt $attempt/12: container app update failed or busy. Output:"
