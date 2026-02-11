@@ -9,9 +9,11 @@
 #   Wrong:     https://your-api.azurecontainerapps.io/api
 # The proxy appends the path (e.g. /voice/stories/shared/delete) to API_UPSTREAM.
 # Exits 0 if all checks pass, 1 otherwise.
+# Use VERIFY_TIMEOUT=60 if the app is cold or your network is slow (default 60).
 
 set -e
 
+TIMEOUT="${VERIFY_TIMEOUT:-60}"
 BASE="${PROD_WEB_URL:-https://app-lifebook-web-v1.azurewebsites.net}"
 PROXY_PING="$BASE/api/proxy-ping"
 API_HEALTH="$BASE/api/health"
@@ -20,7 +22,7 @@ DELETE_ENDPOINT_CHECK="$BASE/api/voice/stories/shared/delete"
 ok=0
 
 echo "→ GET $PROXY_PING"
-code=$(curl -s --max-time 30 -o /tmp/verify-prod-proxy.json -w "%{http_code}" "$PROXY_PING") || code="000"
+code=$(curl -s --max-time "$TIMEOUT" -o /tmp/verify-prod-proxy.json -w "%{http_code}" "$PROXY_PING") || code="000"
 if [[ "$code" != "200" ]]; then
   echo "  FAIL: expected 200, got $code (timeout or connection error if 000)"
   ok=1
@@ -34,7 +36,7 @@ else
 fi
 
 echo "→ GET $API_HEALTH"
-code=$(curl -s --max-time 30 -o /tmp/verify-prod-health.json -w "%{http_code}" "$API_HEALTH") || code="000"
+code=$(curl -s --max-time "$TIMEOUT" -o /tmp/verify-prod-health.json -w "%{http_code}" "$API_HEALTH") || code="000"
 if [[ "$code" != "200" ]]; then
   echo "  FAIL: expected 200, got $code (timeout or connection error if 000)"
   ok=1
@@ -43,7 +45,7 @@ else
 fi
 
 echo "→ GET $DELETE_ENDPOINT_CHECK (delete route exists?)"
-code=$(curl -s --max-time 30 -o /tmp/verify-prod-delete.json -w "%{http_code}" "$DELETE_ENDPOINT_CHECK") || code="000"
+code=$(curl -s --max-time "$TIMEOUT" -o /tmp/verify-prod-delete.json -w "%{http_code}" "$DELETE_ENDPOINT_CHECK") || code="000"
 if [[ "$code" != "200" ]]; then
   echo "  FAIL: expected 200, got $code (if 404, API may not have delete route or API_UPSTREAM may include a path)"
   ok=1
@@ -58,7 +60,7 @@ fi
 # Optional: check deployed app version (meta tag in HTML)
 if [[ -n "${EXPECTED_VERSION:-}" ]]; then
   echo "→ GET $BASE (app-version meta)"
-  code=$(curl -sL --max-time 30 -o /tmp/verify-prod-page.html -w "%{http_code}" "$BASE") || code="000"
+  code=$(curl -sL --max-time "$TIMEOUT" -o /tmp/verify-prod-page.html -w "%{http_code}" "$BASE") || code="000"
   if [[ "$code" != "200" ]]; then
     echo "  FAIL: expected 200, got $code"
     ok=1
