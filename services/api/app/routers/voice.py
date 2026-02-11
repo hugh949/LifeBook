@@ -1136,19 +1136,45 @@ def delete_shared_story(
     )
     if not moment:
         raise HTTPException(status_code=404, detail="Shared story not found.")
-    author_id = (str(moment.participant_id or "") or "").strip().lower()
+    # Resolve author id: moment may have it, or get from linked VoiceStory (backfill may not have run)
+    author_pid = (str(moment.participant_id or "") or "").strip()
+    if not author_pid:
+        story = (
+            db.query(models.VoiceStory)
+            .filter(
+                models.VoiceStory.shared_moment_id == moment.id,
+                models.VoiceStory.family_id == DEFAULT_FAMILY_ID,
+            )
+            .first()
+            )
+        if story and story.participant_id:
+            author_pid = (str(story.participant_id) or "").strip()
+    author_id = author_pid.lower() if author_pid else ""
     body_id = (body.participant_id or "").strip().lower()
+    if not body_id:
+        raise HTTPException(status_code=400, detail="participant_id is required.")
     if author_id != body_id:
         raise HTTPException(status_code=403, detail="Only the author can delete this story.")
-    author_pid = (moment.participant_id or "").strip()
-    participant = (
-        db.query(models.VoiceParticipant)
-        .filter(
-            models.VoiceParticipant.family_id == DEFAULT_FAMILY_ID,
-            func.lower(models.VoiceParticipant.id) == author_pid.lower(),
+    # Look up participant (case-insensitive); try author_pid first, then body.participant_id as fallback for Azure/Postgres casing
+    participant = None
+    if author_pid:
+        participant = (
+            db.query(models.VoiceParticipant)
+            .filter(
+                models.VoiceParticipant.family_id == DEFAULT_FAMILY_ID,
+                func.lower(models.VoiceParticipant.id) == author_pid.lower(),
+            )
+            .first()
         )
-        .first()
-    )
+    if not participant:
+        participant = (
+            db.query(models.VoiceParticipant)
+            .filter(
+                models.VoiceParticipant.family_id == DEFAULT_FAMILY_ID,
+                func.lower(models.VoiceParticipant.id) == body_id,
+            )
+            .first()
+        )
     if not participant:
         raise HTTPException(status_code=404, detail="Participant not found.")
     stored = (getattr(participant, "recall_passphrase", None) or "").strip()
