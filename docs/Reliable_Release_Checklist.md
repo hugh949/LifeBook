@@ -99,7 +99,7 @@ If you added or use features that need new keys, add those **same keys** to prod
 |--------|----------|----------------------------|
 | `OPENAI_API_KEY` | Talk, Narrate TTS, music prompt | Container App (API) / GitHub secret |
 | `OPENAI_TEXT_MODEL` | Optional model override | Container App (API) |
-| `ELEVENLABS_API_KEY` | Narrate Story BGM (ElevenLabs Music) | **Must be in GitHub Secrets** and is passed by deploy-api workflow to the Container App. If missing, BGM returns `url: null` in production. |
+| `ELEVENLABS_API_KEY` | Narrate Story BGM (ElevenLabs Music) + voice cloning for narration | **Must be in GitHub Secrets** and is passed by deploy-api workflow to the Container App. If missing, BGM returns `url: null` and narration uses OpenAI default voice only. |
 | `PICOVOICE_ACCESS_KEY` | Voice ID (Eagle) | Container App (API) |
 | `AZURE_STORAGE_ACCOUNT` / `AZURE_STORAGE_ACCOUNT_KEY` | Uploads, photos, BGM storage | Container App (API) |
 | `DATABASE_URL` | Postgres | Container App (API) / GitHub secret |

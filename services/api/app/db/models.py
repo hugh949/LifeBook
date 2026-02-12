@@ -126,6 +126,8 @@ class VoiceParticipant(Base):
     eagle_profile_data = Column(LargeBinary, nullable=True)  # Voice ID: Picovoice Eagle serialized profile
     eagle_pending_pcm = Column(LargeBinary, nullable=True)  # Voice ID: accumulated PCM until enrollment 100%
     recall_passphrase = Column(String(512), nullable=True)  # Spoken phrase to unlock Recall lists (stored normalized)
+    elevenlabs_voice_id = Column(String(64), nullable=True)  # ElevenLabs voice ID for narration (cloned from conversation)
+    elevenlabs_voice_consent_at = Column(DateTime(timezone=True), nullable=True)  # When user consented (e.g. button press)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 

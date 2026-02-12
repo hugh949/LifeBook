@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { getRealtimeToken, connectRealtimeWebRTC } from "@/lib/realtime";
 import { apiGet, apiPost, apiPatch, apiDelete, apiPostFormData, apiGetWithTimeout, apiPostWithTimeout } from "@/lib/api";
 import { createWavRecorderRolling, recordWavForDuration, type WavRecorderRolling } from "@/lib/wavRecorder";
@@ -10,7 +11,7 @@ import { useVoiceAgent } from "@/app/components/VoiceAgentContext";
 
 type Status = "idle" | "identifying" | "connecting" | "connected" | "stubbed" | "error";
 
-type Participant = { id: string; label: string; has_voice_profile?: boolean; recall_passphrase_set?: boolean };
+type Participant = { id: string; label: string; has_voice_profile?: boolean; recall_passphrase_set?: boolean; has_narration_voice?: boolean };
 
 type VoiceSession = {
   id: string;
@@ -153,7 +154,8 @@ function extractTextFromContent(content: unknown): string {
 }
 
 export default function SessionPage() {
-  const { participantId: contextParticipantId, setParticipantId: setContextParticipantId, refreshParticipants, participants: contextParticipants } = useParticipantIdentity();
+  const searchParams = useSearchParams();
+  const { participantId: contextParticipantId, setParticipantId: setContextParticipantId, refreshParticipants, participants: contextParticipants, listReady } = useParticipantIdentity();
   const { setIsListening } = useVoiceAgent();
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
@@ -161,6 +163,7 @@ export default function SessionPage() {
   const [participantId, setParticipantId] = useState<string>(contextParticipantId ?? "");
   const [recallSessions, setRecallSessions] = useState<VoiceSession[] | null>(null);
   const [storyList, setStoryList] = useState<VoiceStory[] | null>(null);
+  const [lastConversation, setLastConversation] = useState<VoiceSession | null>(null);
   const [continuingFromTags, setContinuingFromTags] = useState<string[] | null>(null);
   const [recallUnlockPending, setRecallUnlockPending] = useState<"conversations" | "stories" | null>(null);
   const [pinError, setPinError] = useState("");
@@ -178,9 +181,13 @@ export default function SessionPage() {
   const [changeOldCode, setChangeOldCode] = useState("");
   const [changeNewCode, setChangeNewCode] = useState("");
   const [changeNewCodeConfirm, setChangeNewCodeConfirm] = useState("");
-  const [editingStoryId, setEditingStoryId] = useState<string | null>(null);
-  const [editingTitle, setEditingTitle] = useState("");
   const [passphraseSetupNewParticipantId, setPassphraseSetupNewParticipantId] = useState<string | null>(null);
+  const [wantToCloneVoice, setWantToCloneVoice] = useState(false);
+  const [voiceCloneCreatedThisSession, setVoiceCloneCreatedThisSession] = useState(false);
+  const wantToCloneVoiceRef = useRef(false);
+  wantToCloneVoiceRef.current = wantToCloneVoice;
+  const voiceCloneCreatedRef = useRef(false);
+  voiceCloneCreatedRef.current = voiceCloneCreatedThisSession;
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const storyPlaybackRef = useRef<HTMLAudioElement | null>(null); // Build 7: play shared story
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -189,12 +196,14 @@ export default function SessionPage() {
   const savingSessionRef = useRef(false); // prevent double submit on End session
   const enrollmentWavRecorderRef = useRef<WavRecorderRolling | null>(null);
   const enrollmentFollowUpIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const voiceCloneCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const participantIdRef = useRef(participantId);
   participantIdRef.current = participantId;
   /** When starting from a conversation (or "Turn into story"), so confirm_story can send source_moment_id. */
   const sessionMomentIdRef = useRef<string | null>(null);
   const recallSessionsRef = useRef(recallSessions);
   const storyListRef = useRef(storyList);
+  const hasAutoStartedRef = useRef(false);
   recallSessionsRef.current = recallSessions;
   storyListRef.current = storyList;
 
@@ -229,9 +238,16 @@ export default function SessionPage() {
       clearInterval(iv);
       enrollmentFollowUpIntervalRef.current = null;
     }
+    const vciv = voiceCloneCheckIntervalRef.current;
+    if (vciv) {
+      clearInterval(vciv);
+      voiceCloneCheckIntervalRef.current = null;
+    }
     setStatus("idle");
     setMessage("");
     setContinuingFromTags(null);
+    setVoiceCloneCreatedThisSession(false);
+    voiceCloneCreatedRef.current = false;
   }, [setIsListening]);
 
   useEffect(() => {
@@ -258,22 +274,30 @@ export default function SessionPage() {
     };
   }, [endSession]);
 
-  // When user changes "I'm [Name]": clear recall list so we never show another person's data; refetch only if this participant is unlocked
+  // When user changes "I'm [Name]": clear last conversation so we don't show another person's data
   useEffect(() => {
-    setRecallSessions(null);
-    setStoryList(null);
-    if (!participantId) return;
-    if (!isRecallUnlocked(participantId)) return;
-    apiGet<VoiceSession[]>(`/voice/sessions?participant_id=${encodeURIComponent(participantId)}`)
-      .then((sessions) => {
-        const seen = new Set<string>();
-        setRecallSessions(sessions.filter((s) => (!seen.has(s.id) && (seen.add(s.id), true))));
-      })
-      .catch(() => setRecallSessions([]));
-    apiGet<VoiceStory[]>(`/voice/stories?participant_id=${encodeURIComponent(participantId)}`)
-      .then(setStoryList)
-      .catch(() => setStoryList([]));
+    setLastConversation(null);
   }, [participantId]);
+
+  // When arriving with moment_id or story_id (from My Memories), start session with that context
+  useEffect(() => {
+    const momentId = searchParams.get("moment_id");
+    const storyId = searchParams.get("story_id");
+    if ((!momentId && !storyId) || !listReady || hasAutoStartedRef.current) return;
+    hasAutoStartedRef.current = true;
+    handleStart(momentId ?? undefined, undefined, storyId ?? undefined);
+    if (typeof window !== "undefined") window.history.replaceState(null, "", "/talk/session");
+  }, [listReady, searchParams]);
+
+  const [lastConversationRefetchKey, setLastConversationRefetchKey] = useState(0);
+  // Fetch last conversation for Create Memories idle view (one card only); refetch after End Session
+  useEffect(() => {
+    const pid = contextParticipantId ?? "";
+    if (status !== "idle" || !hasAutoStartedRef.current || !pid || !isRecallUnlocked(pid)) return;
+    apiGet<VoiceSession[]>(`/voice/sessions?participant_id=${encodeURIComponent(pid)}&limit=1`)
+      .then((sessions) => setLastConversation(sessions?.[0] ?? null))
+      .catch(() => setLastConversation(null));
+  }, [status, contextParticipantId, lastConversationRefetchKey]);
 
   async function handleStart(momentId?: string, recallTags?: string[], storyId?: string) {
     sessionMomentIdRef.current = momentId ?? null;
@@ -312,6 +336,18 @@ export default function SessionPage() {
       setStatus("connecting");
       setMessage("");
 
+      const audio = audioRef.current ?? document.createElement("audio");
+      if (!audioRef.current) {
+        audioRef.current = audio;
+        audio.style.display = "none";
+        document.body.appendChild(audio);
+      }
+
+      // Always get mic and create rolling WAV recorder so "Use my voice for story narration" has audio
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      enrollmentWavRecorderRef.current = createWavRecorderRolling(stream, 60);
+
+      // Fetch token only after we have the stream so it's as fresh as possible when we POST to /realtime/calls (avoids "Ephemeral token expired")
       const data = await getRealtimeToken({
         participant_id: effectiveParticipantId || undefined,
         moment_id: storyId ? undefined : momentId,
@@ -332,19 +368,6 @@ export default function SessionPage() {
         return;
       }
 
-      const audio = audioRef.current ?? document.createElement("audio");
-      if (!audioRef.current) {
-        audioRef.current = audio;
-        audio.style.display = "none";
-        document.body.appendChild(audio);
-      }
-
-      let stream: MediaStream | undefined;
-      if (!effectiveParticipantId) {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        enrollmentWavRecorderRef.current = createWavRecorderRolling(stream, 60);
-      }
-
       const { pc, dc } = await connectRealtimeWebRTC(ephemeralKey, audio, stream);
       pcRef.current = pc;
       turnsRef.current = [];
@@ -361,6 +384,28 @@ export default function SessionPage() {
             apiPostFormData(`/voice/participants/${encodeURIComponent(pid)}/enroll`, form).catch(() => {});
           }
         }, 30000);
+      }
+      // Voice clone check every 10s; needs 1 minute of audio (ElevenLabs recommendation for best quality)
+      // 60s at 16kHz 16-bit mono ≈ 1.92M bytes. Interval runs regardless of checkbox so user can check mid-session.
+      const VOICE_CLONE_MIN_BYTES = 1_920_000;
+      if (enrollmentWavRecorderRef.current && !voiceCloneCheckIntervalRef.current) {
+        voiceCloneCheckIntervalRef.current = setInterval(() => {
+          if (!wantToCloneVoiceRef.current || voiceCloneCreatedRef.current) return;
+          const pid = participantIdRef.current;
+          const blob = enrollmentWavRecorderRef.current?.getWavBlob();
+          if (!pid || !blob || blob.size < VOICE_CLONE_MIN_BYTES) return;
+          const form = new FormData();
+          form.append("audio", blob, "narration-voice.wav");
+          apiPostFormData<{ ok: boolean; message: string }>(`/voice/participants/${encodeURIComponent(pid)}/create-narration-voice`, form)
+            .then((res) => {
+              if (res.ok) {
+                voiceCloneCreatedRef.current = true;
+                setVoiceCloneCreatedThisSession(true);
+                refreshParticipants(pid);
+              }
+            })
+            .catch(() => {});
+        }, 10000);
       }
       const transcriptByItemId = new Map<string, string>();
       // Build 4 & 7: tool calls — track current function call and arguments
@@ -579,67 +624,95 @@ export default function SessionPage() {
         )}
         {status === "idle" && (
           <>
-            <div className="talk-idle-actions">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => handleStart()}
-                style={{ width: "100%" }}
-              >
-                Start talking
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => {
-                  const pid = contextParticipantId ?? "";
-                  if (!pid) {
-                    setRecallSessions([]);
-                    setStoryList(null);
-                    return;
-                  }
-                  if (!isRecallUnlocked(pid)) {
-                    setRecallUnlockPending("conversations");
-                    setPinError("");
-                    return;
-                  }
-                  setStoryList(null);
-                  apiGet<VoiceSession[]>(`/voice/sessions?participant_id=${encodeURIComponent(pid)}`)
-                    .then((sessions) => {
-                      const seen = new Set<string>();
-                      setRecallSessions(sessions.filter((s) => (!seen.has(s.id) && (seen.add(s.id), true))));
-                    })
-                    .catch(() => setRecallSessions([]));
-                }}
-                style={{ width: "100%" }}
-              >
-                Recall a past conversation
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => {
-                  const pid = contextParticipantId ?? "";
-                  if (!pid) {
-                    setStoryList([]);
-                    setRecallSessions(null);
-                    return;
-                  }
-                  if (!isRecallUnlocked(pid)) {
-                    setRecallUnlockPending("stories");
-                    setPinError("");
-                    return;
-                  }
-                  setRecallSessions(null);
-                  apiGet<VoiceStory[]>(`/voice/stories?participant_id=${encodeURIComponent(pid)}`)
-                    .then(setStoryList)
-                    .catch(() => setStoryList([]));
-                }}
-                style={{ width: "100%" }}
-              >
-                Recall past stories
-              </button>
-            </div>
+            {hasAutoStartedRef.current ? (
+              <>
+                <div className="talk-idle-actions">
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => {
+                      hasAutoStartedRef.current = true;
+                      handleStart();
+                    }}
+                    style={{ width: "100%" }}
+                  >
+                    Start Conversation
+                  </button>
+                </div>
+                {lastConversation && contextParticipantId && isRecallUnlocked(contextParticipantId) && (
+                  <div className="card" style={{ marginTop: 12, padding: 14 }}>
+                    <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600 }}>Last conversation</p>
+                    <div className="talk-recall-item">
+                      <button
+                        type="button"
+                        className="btn talk-recall-primary"
+                        onClick={() => handleStart(lastConversation.id, lastConversation.reminder_tags)}
+                        style={{ width: "100%", textAlign: "left" }}
+                      >
+                        <span style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                          {formatSessionDateTime(lastConversation.created_at)}
+                        </span>
+                        {(lastConversation.reminder_tags?.length ?? 0) > 0 && (
+                          <span style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                            {lastConversation.reminder_tags!.map((tag) => (
+                              <span
+                                key={tag}
+                                style={{
+                                  fontSize: 11,
+                                  padding: "2px 6px",
+                                  background: "var(--success-bg)",
+                                  color: "var(--ink-muted)",
+                                  borderRadius: 4,
+                                }}
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <Link
+                  href="/talk/memories"
+                  className="btn btn-ghost"
+                  style={{ width: "100%", marginTop: 12, textAlign: "center", textDecoration: "none" }}
+                >
+                  Additional Conversations &amp; Stories
+                </Link>
+              </>
+            ) : (
+              <div className="card" style={{ padding: 16 }}>
+                <p style={{ margin: "0 0 12px", fontSize: 14, color: "var(--ink-muted)", lineHeight: 1.5 }}>
+                  If you want story narration in your own voice, check the box below and talk for about a minute. Your voice will be cloned for narration only after we verify it works.
+                </p>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, cursor: "pointer", fontSize: 14 }}>
+                  <input
+                    type="checkbox"
+                    checked={wantToCloneVoice}
+                    onChange={(e) => setWantToCloneVoice(e.target.checked)}
+                  />
+                  {(() => {
+                    const participant = contextParticipantId ? contextParticipants.find((p) => p.id === contextParticipantId) : null;
+                    return participant?.has_narration_voice ? "Re-clone my voice again" : "Clone my voice for story narration later";
+                  })()}
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => {
+                    hasAutoStartedRef.current = true;
+                    setVoiceCloneCreatedThisSession(false);
+                    voiceCloneCreatedRef.current = false;
+                    handleStart();
+                  }}
+                  style={{ width: "100%" }}
+                >
+                  Start Conversation
+                </button>
+              </div>
+            )}
             {contextParticipantId && !changingCode && !settingCode && recallUnlockPending === null && (() => {
               const participant = contextParticipants.find((p) => p.id === contextParticipantId);
               const hasCode = !!participant?.recall_passphrase_set;
@@ -843,306 +916,6 @@ export default function SessionPage() {
                 </div>
               );
             })()}
-            {recallSessions !== null && contextParticipantId && isRecallUnlocked(contextParticipantId) && (
-              <div className="card" style={{ marginTop: 12, padding: 14 }}>
-                <p style={{ margin: "0 0 4px", fontSize: 13, fontWeight: 600 }}>
-                  Recall a past conversation
-                </p>
-                <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--ink-muted)" }}>
-                  Continue a conversation or save one as a story to refine and share later.
-                </p>
-                <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                  {recallSessions.length === 0 ? (
-                    <li style={{ fontSize: 14, color: "var(--ink-muted)" }}>No past sessions yet.</li>
-                  ) : (
-                    recallSessions.map((s) => (
-                      <li key={s.id} style={{ marginBottom: 10 }}>
-                        <div className="talk-recall-item">
-                          <button
-                            type="button"
-                            className="btn talk-recall-primary"
-                            onClick={() => handleStart(s.id, s.reminder_tags)}
-                          >
-                            <span style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                              {formatSessionDateTime(s.created_at)}
-                            </span>
-                            {s.reminder_tags && s.reminder_tags.length > 0 && (
-                              <span style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                                {s.reminder_tags.map((tag) => (
-                                  <span
-                                    key={tag}
-                                    style={{
-                                      fontSize: 11,
-                                      padding: "2px 6px",
-                                      background: "var(--success-bg)",
-                                      color: "var(--ink-muted)",
-                                      borderRadius: 4,
-                                    }}
-                                  >
-                                    {tag}
-                                  </span>
-                                ))}
-                              </span>
-                            )}
-                          </button>
-                          <div className="talk-recall-secondary">
-                            <button
-                              type="button"
-                              className="btn btn-ghost"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (!participantId) return;
-                                handleStart(s.id, s.reminder_tags);
-                              }}
-                              title="Turn into story"
-                              aria-label="Turn this conversation into a story with the voice agent"
-                            >
-                              Turn into story
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-ghost"
-                              style={{ color: "var(--ink-muted)" }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (!participantId) return;
-                                if (!window.confirm("Remove this conversation from the list?")) return;
-                                apiDelete(
-                                  `/voice/sessions/${encodeURIComponent(s.id)}?participant_id=${encodeURIComponent(participantId)}`
-                                )
-                                  .then(() => {
-                                    setRecallSessions((prev) => (prev ? prev.filter((x) => x.id !== s.id) : null));
-                                  })
-                                  .catch((err) => {
-                                    setMessage(err instanceof Error ? err.message : "Could not remove.");
-                                  });
-                              }}
-                              title="Remove from list"
-                              aria-label="Remove this conversation from the list"
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      </li>
-                    ))
-                  )}
-                </ul>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  style={{ marginTop: 8, fontSize: 12 }}
-                  onClick={() => setRecallSessions(null)}
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-            {storyList !== null && contextParticipantId && isRecallUnlocked(contextParticipantId) && (
-              <div className="card" style={{ marginTop: 12, padding: 14 }}>
-                <p style={{ margin: "0 0 4px", fontSize: 13, fontWeight: 600 }}>
-                  Recall past stories
-                </p>
-                <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--ink-muted)" }}>
-                  Your private stories. Tap one to refine with the voice agent, or Move to Shared Memories to share with the family.
-                </p>
-                <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                  {storyList.length === 0 ? (
-                    <li style={{ fontSize: 14, color: "var(--ink-muted)" }}>
-                      No stories yet. Use <strong>Recall a past conversation</strong> and tap <strong>Turn into story</strong> to craft one with the voice agent, or create a story during a live conversation and confirm when you're happy with it.
-                    </li>
-                  ) : (
-                    storyList.map((s) => {
-                      const isEditingTitle = editingStoryId === s.id;
-                      return (
-                        <li key={s.id} style={{ marginBottom: 16 }}>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                            <button
-                              type="button"
-                              className="btn"
-                              style={{
-                                textAlign: "left",
-                                padding: "12px 14px",
-                                fontSize: 14,
-                                cursor: "pointer",
-                                display: "block",
-                                width: "100%",
-                              }}
-                              onClick={() => handleStart(undefined, undefined, s.id)}
-                              title="Click to refine this story with the voice agent"
-                            >
-                              <span
-                                style={{
-                                  display: "block",
-                                  fontSize: "0.95rem",
-                                  fontWeight: 600,
-                                  marginBottom: 6,
-                                  wordBreak: "break-word",
-                                  lineHeight: 1.3,
-                                }}
-                              >
-                                {s.title?.trim() || "Untitled story"}
-                              </span>
-                              <span style={{ display: "block", fontSize: 12, color: "var(--ink-muted)", marginBottom: 6 }}>
-                                {formatSessionDateTime(s.created_at)}
-                              </span>
-                              {(s.reminder_tags?.length ?? 0) > 0 && (
-                                <span style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                                  {s.reminder_tags!.map((tag) => (
-                                    <span
-                                      key={tag}
-                                      style={{
-                                        fontSize: 11,
-                                        padding: "2px 6px",
-                                        background: "var(--success-bg)",
-                                        color: "var(--ink-muted)",
-                                        borderRadius: 4,
-                                      }}
-                                    >
-                                      {tag}
-                                    </span>
-                                  ))}
-                                </span>
-                              )}
-                            </button>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                              <button
-                                type="button"
-                                className="btn btn-ghost"
-                                style={{ padding: "8px 10px", fontSize: 12 }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingStoryId(s.id);
-                                  setEditingTitle(s.title?.trim() ?? "");
-                                }}
-                                title="Edit title"
-                                aria-label="Edit story title"
-                              >
-                                Edit title
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-ghost"
-                                style={{ padding: "8px 10px", fontSize: 12, fontWeight: 700 }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (!participantId) return;
-                                  if (!window.confirm("Move this story to Shared Memories? It will be visible to the family.")) return;
-                                  apiPost(
-                                    `/voice/stories/${encodeURIComponent(s.id)}/share?participant_id=${encodeURIComponent(participantId)}`,
-                                    {}
-                                  )
-                                    .then(() => {
-                                      setStoryList((prev) => (prev ? prev.filter((x) => x.id !== s.id) : null));
-                                    })
-                                    .catch((err) => {
-                                      setMessage(err instanceof Error ? err.message : "Could not share.");
-                                    });
-                                }}
-                                title="Move to Shared Memories"
-                                aria-label="Move this story to Shared Memories"
-                              >
-                                Move to Shared Memories
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-ghost"
-                                style={{ padding: "8px 10px", fontSize: 12, color: "var(--ink-muted)" }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (!participantId) return;
-                                  if (!window.confirm("Delete this story?")) return;
-                                  apiDelete(
-                                    `/voice/stories/${encodeURIComponent(s.id)}?participant_id=${encodeURIComponent(participantId)}`
-                                  )
-                                    .then(() => {
-                                      setStoryList((prev) => (prev ? prev.filter((x) => x.id !== s.id) : null));
-                                    })
-                                    .catch((err) => {
-                                      setMessage(err instanceof Error ? err.message : "Could not delete.");
-                                    });
-                                }}
-                                title="Delete story"
-                                aria-label="Delete this story"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </div>
-                          {isEditingTitle && (
-                            <div style={{ marginTop: 8, marginLeft: 0, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                              <input
-                                type="text"
-                                value={editingTitle}
-                                onChange={(e) => setEditingTitle(e.target.value)}
-                                placeholder="Story title"
-                                className="input"
-                                style={{ flex: "1 1 200px", minWidth: 0, maxWidth: 320 }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") {
-                                    e.preventDefault();
-                                    const t = editingTitle.trim();
-                                    if (!participantId || !t) return;
-                                    apiPatch(`/voice/stories/${encodeURIComponent(s.id)}?participant_id=${encodeURIComponent(participantId)}`, { title: t })
-                                      .then(() => {
-                                        setStoryList((prev) => prev ? prev.map((x) => (x.id === s.id ? { ...x, title: t } : x)) : null);
-                                        setEditingStoryId(null);
-                                        setEditingTitle("");
-                                      })
-                                      .catch((err) => setMessage(err instanceof Error ? err.message : "Could not update title."));
-                                  }
-                                  if (e.key === "Escape") {
-                                    setEditingStoryId(null);
-                                    setEditingTitle("");
-                                  }
-                                }}
-                              />
-                              <button
-                                type="button"
-                                className="btn btn-primary"
-                                style={{ fontSize: 12 }}
-                                onClick={() => {
-                                  const t = editingTitle.trim();
-                                  if (!participantId || !t) return;
-                                  apiPatch(`/voice/stories/${encodeURIComponent(s.id)}?participant_id=${encodeURIComponent(participantId)}`, { title: t })
-                                    .then(() => {
-                                      setStoryList((prev) => prev ? prev.map((x) => (x.id === s.id ? { ...x, title: t } : x)) : null);
-                                      setEditingStoryId(null);
-                                      setEditingTitle("");
-                                    })
-                                    .catch((err) => setMessage(err instanceof Error ? err.message : "Could not update title."));
-                                }}
-                              >
-                                Save
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-ghost"
-                                style={{ fontSize: 12 }}
-                                onClick={() => {
-                                  setEditingStoryId(null);
-                                  setEditingTitle("");
-                                }}
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          )}
-                        </li>
-                      );
-                    })
-                  )}
-                </ul>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  style={{ marginTop: 8, fontSize: 12 }}
-                  onClick={() => setStoryList(null)}
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
           </>
         )}
 
@@ -1171,6 +944,42 @@ export default function SessionPage() {
               </p>
             </div>
             <div className="talk-connected-actions">
+            {voiceCloneCreatedThisSession && (
+              <div
+                className="card"
+                style={{
+                  marginBottom: 12,
+                  padding: 12,
+                  background: "var(--success-bg)",
+                  color: "var(--success)",
+                  fontSize: 13,
+                }}
+              >
+                Your voice clone has been created and will be used for voice narration of the stories you share. You can continue having conversations to create your story.
+              </div>
+            )}
+            {wantToCloneVoice && !voiceCloneCreatedThisSession && (
+              <div
+                className="card"
+                style={{
+                  marginBottom: 12,
+                  padding: 12,
+                  fontSize: 12,
+                  color: "var(--ink-muted)",
+                  background: "var(--bg)",
+                }}
+              >
+                <p style={{ margin: "0 0 8px", fontWeight: 600, color: "var(--ink)" }}>
+                  Recording your voice for cloning…
+                </p>
+                <p style={{ margin: "0 0 8px" }}>
+                  Talk for about a minute. 1–2 minutes gives the best clone quality.
+                </p>
+                <p style={{ margin: 0, fontSize: 11, lineHeight: 1.4 }}>
+                  Tips: speak clearly and consistently; avoid background noise; keep a steady tone and volume. Your voice will be verified before we confirm.
+                </p>
+              </div>
+            )}
             <button
               type="button"
               className="btn btn-ghost"
@@ -1213,6 +1022,7 @@ export default function SessionPage() {
                     });
                     refreshParticipants(currentParticipantId);
                     if (weCreatedNewParticipant) setPassphraseSetupNewParticipantId(currentParticipantId);
+                    setLastConversationRefetchKey((k) => k + 1);
                   } catch {
                     // non-blocking; session still ends
                   } finally {

@@ -19,10 +19,24 @@ export default function HomePage() {
         >
           <span style={{ fontSize: "2rem", marginBottom: 8, display: "block" }}>➕</span>
           <h2 style={{ fontFamily: "var(--font-display)", fontSize: "1.25rem", margin: "0 0 8px" }}>
+            Create Memories
+          </h2>
+          <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.95rem" }}>
+            Start a voice session and capture new stories with the gentle voice companion.
+          </p>
+        </Link>
+
+        <Link
+          href="/talk/memories"
+          className="card"
+          style={{ textDecoration: "none", color: "inherit", display: "block", cursor: "pointer" }}
+        >
+          <span style={{ fontSize: "2rem", marginBottom: 8, display: "block" }}>📂</span>
+          <h2 style={{ fontFamily: "var(--font-display)", fontSize: "1.25rem", margin: "0 0 8px" }}>
             My Memories
           </h2>
           <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.95rem" }}>
-            Start a voice session or recall past conversations and stories. Add photos from the link below.
+            Recall past voice conversations and stories you’ve saved.
           </p>
         </Link>
 

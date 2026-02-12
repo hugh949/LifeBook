@@ -5,7 +5,7 @@ import { apiGet } from "@/lib/api";
 
 const STORAGE_KEY = "lifebook_participant_id";
 
-type Participant = { id: string; label: string; has_voice_profile?: boolean; recall_passphrase_set?: boolean };
+type Participant = { id: string; label: string; has_voice_profile?: boolean; recall_passphrase_set?: boolean; has_narration_voice?: boolean };
 
 type ContextValue = {
   participantId: string | null;

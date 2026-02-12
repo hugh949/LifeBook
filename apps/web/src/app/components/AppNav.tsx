@@ -122,6 +122,18 @@ export default function AppNav() {
           }}
           aria-disabled={!listReady}
         >
+          Create Memories
+        </Link>
+        <Link
+          href="/talk/memories"
+          onClick={(e) => !listReady && e.preventDefault()}
+          style={{
+            pointerEvents: listReady ? undefined : "none",
+            opacity: listReady ? undefined : 0.6,
+            cursor: listReady ? undefined : "not-allowed",
+          }}
+          aria-disabled={!listReady}
+        >
           My Memories
         </Link>
         <Link

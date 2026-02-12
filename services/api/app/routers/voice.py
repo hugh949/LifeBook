@@ -208,6 +208,7 @@ class ParticipantOut(BaseModel):
     label: str
     has_voice_profile: bool = False  # Voice ID: enrolled for recognition
     recall_passphrase_set: bool = False  # True if a spoken passphrase is set to unlock Recall lists
+    has_narration_voice: bool = False  # True if ElevenLabs cloned voice exists for story narration
 
 
 class ParticipantCreate(BaseModel):
@@ -240,6 +241,7 @@ def list_participants(db: Session = Depends(get_db)):
             label=r.label,
             has_voice_profile=_has_voice_profile(r),
             recall_passphrase_set=bool(getattr(r, "recall_passphrase", None) and str(r.recall_passphrase).strip()),
+            has_narration_voice=bool(getattr(r, "elevenlabs_voice_id", None) and str(r.elevenlabs_voice_id).strip()),
         )
         for r in rows
     ]
@@ -271,6 +273,7 @@ def create_participant(body: ParticipantCreate, db: Session = Depends(get_db)):
                 label=existing.label,
                 has_voice_profile=_has_voice_profile(existing),
                 recall_passphrase_set=bool(getattr(existing, "recall_passphrase", None) and str(existing.recall_passphrase).strip()),
+                has_narration_voice=bool(getattr(existing, "elevenlabs_voice_id", None) and str(existing.elevenlabs_voice_id).strip()),
             )
     participant = models.VoiceParticipant(
         family_id=DEFAULT_FAMILY_ID,
@@ -285,6 +288,7 @@ def create_participant(body: ParticipantCreate, db: Session = Depends(get_db)):
         label=participant.label,
         has_voice_profile=_has_voice_profile(participant),
         recall_passphrase_set=bool(getattr(participant, "recall_passphrase", None) and str(participant.recall_passphrase).strip()),
+        has_narration_voice=bool(getattr(participant, "elevenlabs_voice_id", None) and str(participant.elevenlabs_voice_id).strip()),
     )
 
 
@@ -539,6 +543,151 @@ async def enroll_participant_voice(
         message="Enrolled" if status == "Enrolled" else "Enrolling (add more speech for best recognition)",
         remaining_speech_sec=float(remaining) if remaining is not None else None,
     )
+
+
+# Minimum audio length for ElevenLabs voice clone: 1 minute recommended for best quality
+# 60s at 16 kHz 16-bit mono ≈ 1.92M bytes
+NARRATION_VOICE_MIN_BYTES = 1_920_000
+
+ELEVENLABS_ADD_VOICE_URL = "https://api.elevenlabs.io/v1/voices/add"
+ELEVENLABS_TTS_URL_TEMPLATE = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+
+
+class CreateNarrationVoiceOut(BaseModel):
+    ok: bool
+    message: str
+
+
+class NarrationVoiceStatusOut(BaseModel):
+    """Diagnostic: verify voice clone exists and voice_id is stored for narration."""
+    has_narration_voice: bool
+    voice_id: str | None  # ElevenLabs voice ID; None if not cloned
+    consent_at: str | None  # ISO timestamp when user consented
+
+
+@router.get("/participants/{participant_id}/narration-voice-status", response_model=NarrationVoiceStatusOut)
+def get_narration_voice_status(participant_id: str, db: Session = Depends(get_db)):
+    """Verify if participant has a cloned voice and ElevenLabs voice_id for narration."""
+    participant = (
+        db.query(models.VoiceParticipant)
+        .filter(
+            models.VoiceParticipant.id == participant_id,
+            models.VoiceParticipant.family_id == DEFAULT_FAMILY_ID,
+        )
+        .first()
+    )
+    if not participant:
+        raise HTTPException(status_code=404, detail="Participant not found")
+    vid = (getattr(participant, "elevenlabs_voice_id", None) or "").strip() or None
+    consent = getattr(participant, "elevenlabs_voice_consent_at", None)
+    return NarrationVoiceStatusOut(
+        has_narration_voice=bool(vid),
+        voice_id=vid,
+        consent_at=consent.isoformat() if consent else None,
+    )
+
+
+@router.post("/participants/{participant_id}/create-narration-voice", response_model=CreateNarrationVoiceOut)
+async def create_narration_voice(
+    participant_id: str,
+    audio: UploadFile = File(..., description="WAV (or convertible) audio; 1+ minute of clear speech for cloning"),
+    db: Session = Depends(get_db),
+):
+    """
+    Create an ElevenLabs cloned voice for this participant for story narration.
+    Uses the same participant identity (family_id) as enroll. Call when user opts in (e.g. "Use my voice for story narration").
+    """
+    api_key = (getattr(settings, "elevenlabs_api_key", None) or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="ElevenLabs API key not configured. Set ELEVENLABS_API_KEY.")
+    participant = (
+        db.query(models.VoiceParticipant)
+        .filter(
+            models.VoiceParticipant.id == participant_id,
+            models.VoiceParticipant.family_id == DEFAULT_FAMILY_ID,
+        )
+        .first()
+    )
+    if not participant:
+        raise HTTPException(status_code=404, detail="Participant not found")
+    try:
+        body = await audio.read()
+    except Exception as e:
+        logger.warning("voice/create-narration-voice: read body %s", e)
+        raise HTTPException(status_code=400, detail="Could not read audio")
+    if len(body) < NARRATION_VOICE_MIN_BYTES:
+        logger.info("voice/create-narration-voice: audio too short participant_id=%s len=%s min=%s", participant_id, len(body), NARRATION_VOICE_MIN_BYTES)
+        raise HTTPException(
+            status_code=400,
+            detail="Audio too short; need at least 1 minute of clear speech for voice cloning",
+        )
+    content_type = getattr(audio, "content_type", "") or ""
+    if not (body[:4] == b"RIFF" and body[8:12] == b"WAVE"):
+        converted = to_wav_16k_mono(body, content_type)
+        if converted:
+            body = converted
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Send WAV or install ffmpeg to accept other formats for voice cloning",
+            )
+    name = f"lifebook-{participant_id}"
+    try:
+        with httpx.Client(timeout=120.0) as client:
+            r = client.post(
+                ELEVENLABS_ADD_VOICE_URL,
+                headers={"xi-api-key": api_key},
+                files={"files": ("audio.wav", body, "audio/wav")},
+                data={"name": name, "remove_background_noise": "true"},
+            )
+        r.raise_for_status()
+        data = r.json()
+        voice_id = (data.get("voice_id") or "").strip()
+        logger.info("voice/create-narration-voice: ElevenLabs response participant_id=%s voice_id=%s data=%s", participant_id, voice_id, data)
+        if not voice_id:
+            logger.warning("voice/create-narration-voice: no voice_id in response %s", data)
+            return CreateNarrationVoiceOut(ok=False, message="Voice created but no ID returned")
+        # Verify the voice works for TTS before confirming to the user (ElevenLabs can return voice_id before it's ready)
+        try:
+            tts_url = ELEVENLABS_TTS_URL_TEMPLATE.format(voice_id=voice_id)
+            with httpx.Client(timeout=15.0) as tts_client:
+                tts_r = tts_client.post(
+                    tts_url,
+                    headers={
+                        "xi-api-key": api_key,
+                        "Content-Type": "application/json",
+                        "Accept": "audio/mpeg",
+                    },
+                    params={"output_format": "mp3_44100_128"},
+                    json={"text": "Hello.", "model_id": "eleven_multilingual_v2"},
+                )
+            tts_r.raise_for_status()
+            if not tts_r.content or len(tts_r.content) < 100:
+                raise ValueError("Test TTS returned empty or too short audio")
+        except Exception as verify_err:
+            logger.warning("voice/create-narration-voice: voice %s not ready for TTS: %s", voice_id, verify_err)
+            raise HTTPException(
+                status_code=502,
+                detail="Voice clone was created but cannot yet be used for narration. Please try again in a few minutes.",
+            )
+    except httpx.HTTPStatusError as e:
+        msg = (e.response.text or str(e))[:400]
+        logger.warning("voice/create-narration-voice: ElevenLabs HTTP %s: %s", e.response.status_code, msg)
+        if e.response.status_code == 422:
+            raise HTTPException(status_code=400, detail="Invalid audio for cloning; try more clear speech, 1+ minute")
+        raise HTTPException(
+            status_code=min(e.response.status_code, 502),
+            detail=msg or "ElevenLabs voice clone failed",
+        )
+    except Exception as e:
+        logger.exception("voice/create-narration-voice: %s", e)
+        raise HTTPException(status_code=502, detail=str(e))
+    participant.elevenlabs_voice_id = voice_id
+    participant.elevenlabs_voice_consent_at = datetime.now(timezone.utc)
+    db.add(participant)
+    db.commit()
+    logger.info("voice/create-narration-voice: saved participant_id=%s elevenlabs_voice_id=%s (verified for TTS)", participant_id, voice_id)
+    return CreateNarrationVoiceOut(ok=True, message="Voice created")
 
 
 class TurnOut(BaseModel):
@@ -1091,8 +1240,9 @@ class MarkListenedBody(BaseModel):
 
 
 class NarrateBody(BaseModel):
-    """Text to speak with OpenAI TTS (same voice as voice agent)."""
+    """Text to speak with OpenAI TTS (alloy) or, if participant_id has a clone, ElevenLabs TTS."""
     text: str
+    participant_id: str | None = None  # When set and participant has elevenlabs_voice_id, use cloned voice
 
 
 class NarrateMoodOut(BaseModel):
@@ -1372,14 +1522,66 @@ OPENAI_TTS_MAX_CHARS = 4096
 
 
 @router.post("/narrate", response_class=Response)
-def narrate_tts(body: NarrateBody):
-    """Generate speech from text using OpenAI TTS (alloy voice, same as voice agent). Returns audio/mpeg."""
-    api_key = (getattr(settings, "openai_api_key", None) or "").strip()
-    if not api_key:
-        raise HTTPException(status_code=503, detail="OpenAI API key not configured. Set OPENAI_API_KEY for narration.")
+def narrate_tts(body: NarrateBody, db: Session = Depends(get_db)):
+    """Generate speech from text. If participant_id is set and that participant has a cloned voice (and ELEVENLABS_API_KEY), use ElevenLabs TTS; otherwise OpenAI TTS (alloy). Returns audio/mpeg."""
     text = (body.text or "").strip()[:OPENAI_TTS_MAX_CHARS]
     if not text:
         raise HTTPException(status_code=400, detail="Text is required for narration.")
+    participant_id = (body.participant_id or "").strip() or None
+    elevenlabs_voice_id = None
+    if participant_id:
+        participant = (
+            db.query(models.VoiceParticipant)
+            .filter(
+                models.VoiceParticipant.id == participant_id,
+                models.VoiceParticipant.family_id == DEFAULT_FAMILY_ID,
+            )
+            .first()
+        )
+        if participant:
+            elevenlabs_voice_id = (getattr(participant, "elevenlabs_voice_id", None) or "").strip() or None
+    elevenlabs_key = (getattr(settings, "elevenlabs_api_key", None) or "").strip()
+    logger.info(
+        "voice/narrate: participant_id=%s elevenlabs_voice_id=%s elevenlabs_configured=%s",
+        participant_id, elevenlabs_voice_id, bool(elevenlabs_key),
+    )
+    if elevenlabs_voice_id and elevenlabs_key:
+        try:
+            url = ELEVENLABS_TTS_URL_TEMPLATE.format(voice_id=elevenlabs_voice_id)
+            with httpx.Client(timeout=60.0) as client:
+                r = client.post(
+                    url,
+                    headers={
+                        "xi-api-key": elevenlabs_key,
+                        "Content-Type": "application/json",
+                        "Accept": "audio/mpeg",
+                    },
+                    params={"output_format": "mp3_44100_128"},
+                    json={"text": text, "model_id": "eleven_multilingual_v2"},
+                )
+            r.raise_for_status()
+            content = r.content
+            normalized = normalize_lufs_mp3(content, NARRATION_LUFS)
+            if normalized:
+                content = normalized
+            logger.info("voice/narrate: used ElevenLabs cloned voice participant_id=%s voice_id=%s", participant_id, elevenlabs_voice_id)
+            return Response(
+                content=content,
+                media_type="audio/mpeg",
+                headers={"X-Narration-Voice": "cloned"},
+            )
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                "voice/narrate: ElevenLabs TTS failed for participant_id=%s voice_id=%s HTTP %s: %s",
+                participant_id, elevenlabs_voice_id, e.response.status_code, (e.response.text or "")[:300],
+            )
+            # Fall through to OpenAI TTS (user will hear default voice, not cloned)
+        except Exception as e:
+            logger.warning("voice/narrate: ElevenLabs TTS failed for participant_id=%s: %s", participant_id, e)
+            # Fall through to OpenAI TTS
+    api_key = (getattr(settings, "openai_api_key", None) or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured. Set OPENAI_API_KEY for narration.")
     try:
         with httpx.Client(timeout=60.0) as client:
             r = client.post(
@@ -1401,7 +1603,12 @@ def narrate_tts(body: NarrateBody):
         normalized = normalize_lufs_mp3(content, NARRATION_LUFS)
         if normalized:
             content = normalized
-        return Response(content=content, media_type="audio/mpeg")
+        logger.info("voice/narrate: used OpenAI default voice (participant_id=%s had no clone or ElevenLabs failed)", participant_id)
+        return Response(
+            content=content,
+            media_type="audio/mpeg",
+            headers={"X-Narration-Voice": "default"},
+        )
     except httpx.HTTPStatusError as e:
         logger.warning("voice/narrate: OpenAI TTS HTTP %s: %s", e.response.status_code, (e.response.text or "")[:300])
         raise HTTPException(

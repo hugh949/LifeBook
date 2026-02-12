@@ -28,7 +28,8 @@ export default function BottomNav() {
   return (
     <nav className="app-bottom-nav" aria-label="Main">
       {link("/", "Home")}
-      {link("/talk/session", "My Memories")}
+      {link("/talk/session", "Create Memories")}
+      {link("/talk/memories", "My Memories")}
       {link("/bank", "Shared Memories")}
     </nav>
   );

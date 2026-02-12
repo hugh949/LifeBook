@@ -171,6 +171,8 @@ export default function BankPage() {
   const narratePlaybackCompletedRef = useRef(false);
   /** When TTS is ready but user has not tapped play yet (avoids autoplay block). */
   const [showTapToPlay, setShowTapToPlay] = useState(false);
+  /** "cloned" = your voice; "default" = AI voice (clone not used or unavailable). */
+  const [narrateVoiceUsed, setNarrateVoiceUsed] = useState<"cloned" | "default" | null>(null);
   const narratePendingBgmUrlRef = useRef<string | null>(null);
   const NARRATE_FETCH_TIMEOUT_MS = 120000;
   /** Shared Memories view: voice (default) | photos | videos */
@@ -273,7 +275,10 @@ export default function BankPage() {
     setNarrateError(null);
     setNarrateLoading(true);
     setNarratingMomentId(story.id);
-    const ttsBody = JSON.stringify({ text: text.trim() });
+    const ttsBody = JSON.stringify({
+      text: text.trim(),
+      ...(story.participant_id ? { participant_id: story.participant_id } : {}),
+    });
     const bgmBody = JSON.stringify({ moment_id: story.id, text: text.trim() });
     const abort = new AbortController();
     const timeoutId = setTimeout(() => abort.abort(), NARRATE_FETCH_TIMEOUT_MS);
@@ -294,7 +299,9 @@ export default function BankPage() {
           return { url: null };
         });
 
-      if (typeof window !== "undefined") console.log("[narrate] TTS fetch starting");
+      if (typeof window !== "undefined") {
+        console.log("[narrate] TTS fetch starting", { participant_id: story.participant_id ?? null });
+      }
       const narrateRes = await fetch(`${API_BASE}/voice/narrate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -303,8 +310,15 @@ export default function BankPage() {
       });
       clearTimeout(timeoutId);
 
+      const narrationVoice = (narrateRes.headers.get("X-Narration-Voice") ?? "unknown") as "cloned" | "default" | string;
+      setNarrateVoiceUsed(narrationVoice === "cloned" ? "cloned" : narrationVoice === "default" ? "default" : null);
       if (typeof window !== "undefined") {
-        console.log("[narrate] TTS fetch completed", { status: narrateRes.status, ok: narrateRes.ok });
+        console.log("[narrate] TTS fetch completed", {
+          status: narrateRes.status,
+          ok: narrateRes.ok,
+          "X-Narration-Voice": narrationVoice,
+          participant_id: story.participant_id ?? null,
+        });
       }
 
       if (!narrateRes.ok) {
@@ -365,6 +379,7 @@ export default function BankPage() {
       }
       setNarratingMomentId(null);
       setShowTapToPlay(false);
+      setNarrateVoiceUsed(null);
       if (typeof window !== "undefined") console.warn("[narrate] error", err);
     } finally {
       setNarrateLoading(false);
@@ -426,7 +441,9 @@ export default function BankPage() {
     narratePlaybackCompletedRef.current = false;
     cleanupNarrate();
     setNarratingMomentId(null);
+    setNarrateLoading(false);
     setNarrateError(null);
+    setNarrateVoiceUsed(null);
   }
 
   /** Start recording a voice reaction for the given moment. */
@@ -709,15 +726,23 @@ export default function BankPage() {
                                 </span>
                               )}
                               {showTapToPlay && !narrateLoading && (
-                                <button
-                                  type="button"
-                                  className="btn btn-primary"
-                                  onClick={handleTapToPlayNarrate}
-                                  aria-label="Tap to play narration"
-                                  style={{ fontSize: 13 }}
-                                >
-                                  Tap to play
-                                </button>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    onClick={handleTapToPlayNarrate}
+                                    aria-label="Tap to play narration"
+                                    style={{ fontSize: 13 }}
+                                  >
+                                    Tap to play
+                                  </button>
+                                  {narrateVoiceUsed === "cloned" && (
+                                    <span style={{ fontSize: 12, color: "var(--success)" }}>Your voice</span>
+                                  )}
+                                  {narrateVoiceUsed === "default" && (
+                                    <span style={{ fontSize: 12, color: "var(--ink-muted)" }}>Default voice (clone not used)</span>
+                                  )}
+                                </span>
                               )}
                               {narrateError && expandedVoiceId !== s.id && (
                                 <span role="alert" style={{ fontSize: 12, color: "var(--error)" }}>{narrateError}</span>
