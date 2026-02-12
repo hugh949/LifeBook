@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { getRealtimeToken, connectRealtimeWebRTC } from "@/lib/realtime";
 import { apiGet, apiPost, apiPatch, apiDelete, apiPostFormData, apiGetWithTimeout, apiPostWithTimeout } from "@/lib/api";
 import { createWavRecorderRolling, recordWavForDuration, type WavRecorderRolling } from "@/lib/wavRecorder";
@@ -155,6 +155,7 @@ function extractTextFromContent(content: unknown): string {
 
 export default function SessionPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { participantId: contextParticipantId, setParticipantId: setContextParticipantId, refreshParticipants, participants: contextParticipants, listReady } = useParticipantIdentity();
   const { setIsListening } = useVoiceAgent();
   const [status, setStatus] = useState<Status>("idle");
@@ -423,6 +424,7 @@ export default function SessionPage() {
               type?: string;
               item?: { id?: string; type?: string; role?: string; content?: unknown; name?: string };
               item_id?: string;
+              call_id?: string;
               output_item_id?: string;
               transcript?: string;
               delta?: string;
@@ -453,7 +455,11 @@ export default function SessionPage() {
               if (ev.item?.name === "play_story" || ev.item?.name === "confirm_story") playStoryArgsBuffer.length = 0;
             }
             if (t === "response.function_call_arguments.delta" && typeof ev.delta === "string") {
-              playStoryArgsBuffer.push(ev.delta);
+              const matchesCall =
+                !ev.item_id && !ev.call_id
+                  ? true
+                  : ev.item_id === pendingCallId || ev.call_id === pendingCallId;
+              if (matchesCall) playStoryArgsBuffer.push(ev.delta);
             }
             if (t === "response.function_call_arguments.done") {
               const raw = typeof ev.arguments === "string" && ev.arguments.trim()
@@ -547,6 +553,8 @@ export default function SessionPage() {
                     })
                   );
                   triggerResponse();
+                  endSession();
+                  router.push("/talk/memories");
                 } catch (err) {
                   sendToolOutput(JSON.stringify({ error: err instanceof Error ? err.message : "Could not save story" }));
                   triggerResponse();

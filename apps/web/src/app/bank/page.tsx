@@ -362,15 +362,27 @@ export default function BankPage() {
         setShowTapToPlay(false);
         setNarrateError("Narration playback failed. Try again.");
       };
-      // Wait for BGM so we have it when user taps play
+      // Wait for BGM so we have it when playback starts
       const bgmRes = await bgmPromise;
       const bgmUrl = bgmRes?.url && typeof bgmRes.url === "string" ? bgmRes.url.trim() : null;
       narratePendingBgmUrlRef.current = bgmUrl;
-      if (typeof window !== "undefined") {
-        console.log("[narrate] Ready for tap-to-play", { hasBgm: !!bgmUrl });
-      }
-      // Show "Tap to play" instead of calling play() so a fresh user gesture starts playback (avoids autoplay block)
-      setShowTapToPlay(true);
+      // Try to start playback immediately (one-tap flow). If the browser blocks it, show "Tap to play".
+      audio.play().then(() => {
+        if (typeof window !== "undefined") console.log("[narrate] auto-play started");
+        setShowTapToPlay(false);
+        if (bgmUrl) {
+          const bgm = new Audio(bgmUrl);
+          narrateBgmRef.current = bgm;
+          bgm.volume = 0.2;
+          bgm.loop = true;
+          bgm.onerror = () => {};
+          bgm.play().catch(() => {});
+        }
+        narratePendingBgmUrlRef.current = null;
+      }).catch((playErr) => {
+        if (typeof window !== "undefined") console.log("[narrate] auto-play blocked, show Tap to play", playErr);
+        setShowTapToPlay(true);
+      });
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         setNarrateError("Narration request timed out. Try again.");
