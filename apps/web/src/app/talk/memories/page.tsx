@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useParticipantIdentity } from "@/app/components/ParticipantIdentity";
-import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
+import { API_BASE, apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
 
 const RECALL_UNLOCK_STORAGE_KEY = "lifebook_recall_unlocked";
 
@@ -80,6 +80,19 @@ export default function MyMemoriesPage() {
   const [editingTitle, setEditingTitle] = useState("");
   const [mobileTab, setMobileTab] = useState<"conversations" | "stories">("conversations");
 
+  /** Narrate story (same flow as bank page): state and refs */
+  const [narrateLoading, setNarrateLoading] = useState(false);
+  const [narrateError, setNarrateError] = useState<string | null>(null);
+  const [narratingStoryId, setNarratingStoryId] = useState<string | null>(null);
+  const [showTapToPlay, setShowTapToPlay] = useState(false);
+  const [narrateVoiceUsed, setNarrateVoiceUsed] = useState<"cloned" | "default" | null>(null);
+  const narrateAudioRef = useRef<HTMLAudioElement | null>(null);
+  const narrateUrlRef = useRef<string | null>(null);
+  const narrateBgmRef = useRef<HTMLAudioElement | null>(null);
+  const narratePlaybackCompletedRef = useRef(false);
+  const narratePendingBgmUrlRef = useRef<string | null>(null);
+  const NARRATE_FETCH_TIMEOUT_MS = 120000;
+
   const pid = contextParticipantId ?? "";
   const unlocked = pid && isRecallUnlocked(pid);
   const participant = pid ? contextParticipants.find((p) => p.id === pid) : null;
@@ -109,6 +122,156 @@ export default function MyMemoriesPage() {
         .catch(() => setStories([]));
     }
   };
+
+  /** Story shape for narrate API (id, title, summary, participant_id). */
+  type NarrateStory = { id: string; title: string | null; summary: string | null; participant_id: string };
+  function cleanupNarrate() {
+    setShowTapToPlay(false);
+    narratePendingBgmUrlRef.current = null;
+    const url = narrateUrlRef.current;
+    if (url) {
+      URL.revokeObjectURL(url);
+      narrateUrlRef.current = null;
+    }
+    const audio = narrateAudioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.src = "";
+      narrateAudioRef.current = null;
+    }
+    const bgm = narrateBgmRef.current;
+    if (bgm) {
+      bgm.pause();
+      bgm.src = "";
+      narrateBgmRef.current = null;
+    }
+  }
+  function stopNarrate() {
+    narratePlaybackCompletedRef.current = false;
+    cleanupNarrate();
+    setNarratingStoryId(null);
+    setNarrateLoading(false);
+    setNarrateError(null);
+    setNarrateVoiceUsed(null);
+  }
+  async function narrateStory(story: NarrateStory) {
+    const text = (story.summary?.trim() || story.title?.trim() || "No content to read.").slice(0, 4096);
+    if (!text.trim()) return;
+    stopNarrate();
+    setNarrateError(null);
+    setNarrateLoading(true);
+    setNarratingStoryId(story.id);
+    const ttsBody = JSON.stringify({
+      text: text.trim(),
+      participant_id: story.participant_id,
+    });
+    const bgmBody = JSON.stringify({ moment_id: story.id, text: text.trim() });
+    const abort = new AbortController();
+    const timeoutId = setTimeout(() => abort.abort(), NARRATE_FETCH_TIMEOUT_MS);
+    try {
+      const bgmPromise = fetch(`${API_BASE}/voice/narrate/bgm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: bgmBody,
+      })
+        .then((r) => (r.ok ? r.json() : { url: null }))
+        .catch(() => ({ url: null }));
+      const narrateRes = await fetch(`${API_BASE}/voice/narrate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: ttsBody,
+        signal: abort.signal,
+      });
+      clearTimeout(timeoutId);
+      const narrationVoice = (narrateRes.headers.get("X-Narration-Voice") ?? "unknown") as string;
+      setNarrateVoiceUsed(narrationVoice === "cloned" ? "cloned" : narrationVoice === "default" ? "default" : null);
+      if (!narrateRes.ok) {
+        const errBody = await narrateRes.text();
+        let msg = narrateRes.statusText;
+        try {
+          const j = JSON.parse(errBody);
+          if (j.detail) msg = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
+        } catch {
+          if (errBody) msg = errBody.slice(0, 200);
+        }
+        throw new Error(msg);
+      }
+      const blob = await narrateRes.blob();
+      if (!blob.size) throw new Error("No audio received. Try again.");
+      const url = URL.createObjectURL(blob);
+      narrateUrlRef.current = url;
+      const audio = new Audio(url);
+      narrateAudioRef.current = audio;
+      audio.onended = () => {
+        narratePlaybackCompletedRef.current = true;
+        cleanupNarrate();
+        setNarratingStoryId(null);
+        setShowTapToPlay(false);
+      };
+      audio.onerror = () => {
+        if (narratePlaybackCompletedRef.current) {
+          cleanupNarrate();
+          setNarratingStoryId(null);
+          setShowTapToPlay(false);
+          return;
+        }
+        cleanupNarrate();
+        setNarratingStoryId(null);
+        setShowTapToPlay(false);
+        setNarrateError("Narration playback failed. Try again.");
+      };
+      const bgmRes = await bgmPromise;
+      const bgmUrl = bgmRes?.url && typeof bgmRes.url === "string" ? bgmRes.url.trim() : null;
+      narratePendingBgmUrlRef.current = bgmUrl;
+      audio.play().then(() => {
+        setShowTapToPlay(false);
+        if (bgmUrl) {
+          const bgm = new Audio(bgmUrl);
+          narrateBgmRef.current = bgm;
+          bgm.volume = 0.2;
+          bgm.loop = true;
+          bgm.onerror = () => {};
+          bgm.play().catch(() => {});
+        }
+        narratePendingBgmUrlRef.current = null;
+      }).catch(() => setShowTapToPlay(true));
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        setNarrateError("Narration request timed out. Try again.");
+      } else {
+        setNarrateError(err instanceof Error ? err.message : "Narration failed");
+      }
+      setNarratingStoryId(null);
+      setShowTapToPlay(false);
+      setNarrateVoiceUsed(null);
+    } finally {
+      setNarrateLoading(false);
+    }
+  }
+  function handleTapToPlayNarrate() {
+    const audio = narrateAudioRef.current;
+    if (!audio) return;
+    setShowTapToPlay(false);
+    audio
+      .play()
+      .then(() => {
+        const bgmUrl = narratePendingBgmUrlRef.current;
+        if (bgmUrl) {
+          const bgm = new Audio(bgmUrl);
+          narrateBgmRef.current = bgm;
+          bgm.volume = 0.2;
+          bgm.loop = true;
+          bgm.onerror = () => {};
+          bgm.play().catch(() => {});
+        }
+        narratePendingBgmUrlRef.current = null;
+      })
+      .catch((playErr) => {
+        cleanupNarrate();
+        setNarratingStoryId(null);
+        setNarrateError(playErr?.message || "Playback was blocked. Tap Narrate again to listen.");
+      });
+  }
 
   if (!listReady) {
     return (
@@ -399,6 +562,41 @@ export default function MyMemoriesPage() {
                   </Link>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
                     <button type="button" className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => { setEditingStoryId(s.id); setEditingTitle(s.title?.trim() ?? ""); }}>Edit title</button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      style={{ fontSize: 12 }}
+                      onClick={() => {
+                        if (narratingStoryId === s.id && !narrateLoading) {
+                          stopNarrate();
+                          return;
+                        }
+                        if (narrateLoading && narratingStoryId === s.id) return;
+                        if (narratingStoryId && narratingStoryId !== s.id) stopNarrate();
+                        narrateStory({ id: s.id, title: s.title, summary: s.summary, participant_id: pid });
+                      }}
+                      disabled={narrateLoading && narratingStoryId === s.id}
+                      aria-label="Narrate story with voice agent quality"
+                    >
+                      {narrateLoading && narratingStoryId === s.id ? "Preparing…" : narratingStoryId === s.id ? "⏹ Stop" : "Narrate Story"}
+                    </button>
+                    {narratingStoryId === s.id && (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        {narrateLoading && (
+                          <span style={{ fontSize: 12, color: "var(--ink-muted)" }}>Preparing…</span>
+                        )}
+                        {showTapToPlay && !narrateLoading && (
+                          <>
+                            <button type="button" className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleTapToPlayNarrate} aria-label="Tap to play narration">
+                              Tap to play
+                            </button>
+                            {narrateVoiceUsed === "cloned" && <span style={{ fontSize: 12, color: "var(--success)" }}>Your voice</span>}
+                            {narrateVoiceUsed === "default" && <span style={{ fontSize: 12, color: "var(--ink-muted)" }}>Default voice</span>}
+                          </>
+                        )}
+                        {narrateError && <span role="alert" style={{ fontSize: 12, color: "var(--error)" }}>{narrateError}</span>}
+                      </span>
+                    )}
                     <button
                       type="button"
                       className="btn btn-ghost"
