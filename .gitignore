@@ -1,5 +1,6 @@
 # Env (keep .env.example)
 .env
+.env.azure
 .env.local
 *.local
 
@@ -25,3 +26,6 @@ services/api/build/
 
 # Docker
 pgdata/
+
+# Performance and QA logs (local verification)
+logs/
