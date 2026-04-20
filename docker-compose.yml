@@ -5,8 +5,11 @@ services:
       POSTGRES_DB: lifebook
       POSTGRES_USER: lifebook
       POSTGRES_PASSWORD: lifebook
+    # Host port 5434 to avoid clashing with other local Postgres instances
+    # (5432/5433 are commonly taken on dev machines). The api/web containers
+    # reach the DB via the internal `db:5432` address regardless of this mapping.
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:

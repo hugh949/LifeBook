@@ -1,14 +1,16 @@
 import os
 from pydantic import BaseModel
 
-# Default family ID for local MVP when no auth (see migration 001).
-DEFAULT_FAMILY_ID = "00000000-0000-4000-a000-000000000001"
-
 
 class Settings(BaseModel):
     app_env: str = os.getenv("APP_ENV", "local")
     database_url: str = os.getenv("DATABASE_URL", "")
     cors_allow_origins: str = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000")
+
+    # Session JWT secret for cookie auth. Must be set in any non-local environment.
+    session_secret: str = os.getenv("SESSION_SECRET", "dev-lifebook-secret-change-me")
+    session_cookie_name: str = os.getenv("SESSION_COOKIE_NAME", "lb_session")
+    session_ttl_days: int = int(os.getenv("SESSION_TTL_DAYS", "30"))
 
     azure_storage_account: str = os.getenv("AZURE_STORAGE_ACCOUNT", "")
     azure_storage_account_key: str = os.getenv("AZURE_STORAGE_ACCOUNT_KEY", "")

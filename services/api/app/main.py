@@ -6,7 +6,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.logging_config import setup_logging
-from app.routers import health, media, realtime, sessions, moments, voice
+from app.routers import (
+    auth,
+    health,
+    library,
+    me_avatar,
+    me_voice,
+    media,
+    realtime,
+    sessions,
+    shares,
+)
 
 setup_logging()
 logger = logging.getLogger("lifebook.api")
@@ -63,11 +73,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(health.router)
+app.include_router(auth.router)
 app.include_router(media.router)
 app.include_router(realtime.router)
 app.include_router(sessions.router)
-app.include_router(moments.router)
-app.include_router(voice.router)
+app.include_router(me_voice.router)
+app.include_router(me_avatar.router)
+app.include_router(library.router)
+app.include_router(shares.router)
 
 
 # Register after routers so we override Starlette's default 500 "Internal Server Error"

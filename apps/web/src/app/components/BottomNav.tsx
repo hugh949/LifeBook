@@ -2,35 +2,32 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useParticipantIdentity } from "./ParticipantIdentity";
+
+type Tab = { href: string; label: string; match: (path: string) => boolean };
+
+const TABS: Tab[] = [
+  { href: "/talk", label: "Talk", match: (p) => p === "/talk" || p.startsWith("/talk/") },
+  { href: "/library", label: "Library", match: (p) => p === "/library" || p.startsWith("/library/") },
+  { href: "/me", label: "Me", match: (p) => p === "/me" || p.startsWith("/me/") },
+];
 
 export default function BottomNav() {
-  const pathname = usePathname();
-  const { listReady } = useParticipantIdentity();
-
-  const link = (href: string, label: string) => {
-    const isActive = pathname === href || (href !== "/" && pathname.startsWith(href));
-    return (
-      <Link
-        href={href}
-        onClick={(e) => !listReady && href !== "/" && e.preventDefault()}
-        aria-current={isActive ? "page" : undefined}
-        style={{
-          pointerEvents: listReady || href === "/" ? undefined : "none",
-          opacity: listReady || href === "/" ? undefined : 0.6,
-        }}
-      >
-        {label}
-      </Link>
-    );
-  };
-
+  const pathname = usePathname() || "";
   return (
     <nav className="app-bottom-nav" aria-label="Main">
-      {link("/", "Home")}
-      {link("/talk/session", "Create Memories")}
-      {link("/talk/memories", "My Memories")}
-      {link("/bank", "Shared Memories")}
+      {TABS.map((t) => {
+        const active = t.match(pathname);
+        return (
+          <Link
+            key={t.href}
+            href={t.href}
+            aria-current={active ? "page" : undefined}
+            className={active ? "active" : undefined}
+          >
+            {t.label}
+          </Link>
+        );
+      })}
     </nav>
   );
 }

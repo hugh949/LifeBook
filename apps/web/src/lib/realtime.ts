@@ -9,19 +9,15 @@ export type RealtimeTokenResponse = {
 };
 
 export type RealtimeTokenRequest = {
-  participant_id?: string;
-  participant_name?: string;
-  moment_id?: string;  // Build 3: recall this past session
-  story_id?: string;  // Build 5: refine this story
+  conversation_id?: string;  // recall a past conversation
+  story_id?: string;         // refine an existing story
 };
 
 export async function getRealtimeToken(
   options: RealtimeTokenRequest = {}
 ): Promise<RealtimeTokenResponse> {
   return apiPost<RealtimeTokenResponse>("/realtime/token", {
-    participant_id: options.participant_id ?? undefined,
-    participant_name: options.participant_name ?? undefined,
-    moment_id: options.moment_id ?? undefined,
+    conversation_id: options.conversation_id ?? undefined,
     story_id: options.story_id ?? undefined,
   });
 }

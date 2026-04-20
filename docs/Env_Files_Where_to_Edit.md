@@ -2,6 +2,11 @@
 
 LifeBook uses env vars in a few places. Here’s how they relate so you only update what you need.
 
+> **Production note:** set `SESSION_SECRET` to a strong random value in Azure
+> before opening the app to real users &mdash; it signs the session cookies. A
+> generator one-liner: `python -c "import secrets; print(secrets.token_urlsafe(64))"`.
+> Changing it later signs everyone out but is otherwise safe.
+
 ---
 
 ## Simplest way (local dev + Azure production)
@@ -31,7 +36,7 @@ That way you never wonder “where does this key go?” — it’s always: in `.
 | How you run the app | File to edit | Notes |
 |---------------------|--------------|--------|
 | **Docker Compose** (`docker compose up`) | **Repo root** `.env` | Only this file is loaded for the API (and DB URL is overridden in `docker-compose.yml`). |
-| **API scripts / Alembic** | **Repo root** `.env` only | Scripts and Alembic load only root `.env`. Run scripts with the full path so you don't depend on current directory, e.g. `python /path/to/LifeBook/services/api/scripts/test_speaker_recognition.py`. |
+| **API scripts / Alembic** | **Repo root** `.env` only | Scripts and Alembic load only root `.env`. Run scripts with the full path so you don't depend on current directory. |
 | **Web app locally** (`npm run dev` in `apps/web`) | **`apps/web/.env.local`** | Next.js convention; copy from `apps/web/.env.local.example`. Use for `API_UPSTREAM` when talking to the API. |
 
 **Recommendation:** For most setups, use **one** file: copy `.env.example` to **`.env` at the repo root** and put your keys there. Use that for Docker and for any API work. Only add `apps/web/.env.local` if you run the web app outside Docker and need to point it at a different API.
@@ -44,7 +49,7 @@ That way you never wonder “where does this key go?” — it’s always: in `.
 
 - **Docker Compose:** The **api** service has `env_file: - ./.env`, so every variable in root `.env` is passed into the API container. The **web** service does not use this file; its env is set in `docker-compose.yml`.
 - **API when run outside Docker:** The FastAPI app does not load any `.env` itself; it only reads `os.environ`. So you must either export vars in your shell or run from an environment that has already loaded root `.env` (e.g. your IDE or a wrapper script).
-- **Scripts in `services/api/scripts/`** and **Alembic** load `.env` via `python-dotenv` from **repo root only**. Use the full path to the script when you run it so the current directory doesn't matter (e.g. `python /path/to/LifeBook/services/api/scripts/test_speaker_recognition.py`).
+- **Scripts in `services/api/scripts/`** and **Alembic** load `.env` via `python-dotenv` from **repo root only**. Use the full path to the script when you run it so the current directory doesn't matter.
 
 - **Migrations:** If your `DATABASE_URL` uses host `db` (Docker service name), that only resolves **inside** containers. To run migrations from your machine, either run them inside the API container (`docker compose run --rm api alembic upgrade head` from repo root) or use a `DATABASE_URL` with `localhost` when Postgres is exposed on 5432 (e.g. `docker compose up db` then `DATABASE_URL=postgresql://lifebook:lifebook@localhost:5432/lifebook?sslmode=disable alembic -c services/api/alembic.ini upgrade head` from repo root).
 

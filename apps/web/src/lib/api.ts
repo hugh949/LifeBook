@@ -42,28 +42,49 @@ async function parseErrorResponse(res: Response): Promise<{ msg: string; body: s
   return { msg, body };
 }
 
-export async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {
+export type ApiOptions = RequestInit & {
+  /**
+   * HTTP statuses that should be thrown but NOT logged via console.error.
+   * Use for probes where a non-2xx is an expected branch of the state
+   * machine (e.g. `GET /auth/me` returning 401 when signed out).
+   */
+  silentStatuses?: number[];
+};
+
+function splitInit(init?: ApiOptions): { init: RequestInit | undefined; silent: number[] } {
+  if (!init) return { init: undefined, silent: [] };
+  const { silentStatuses, ...rest } = init;
+  return { init: rest, silent: silentStatuses ?? [] };
+}
+
+export async function apiGet<T>(path: string, init?: ApiOptions): Promise<T> {
   const url = `${API_BASE}${path}`;
-  const res = await fetch(url, { ...init, cache: "no-store" });
+  const { init: fetchInit, silent } = splitInit(init);
+  const res = await fetch(url, { ...fetchInit, cache: "no-store" });
   if (!res.ok) {
     const { msg, body } = await parseErrorResponse(res);
-    logApiError("GET", path, res.status, url, body, msg);
+    if (!silent.includes(res.status)) {
+      logApiError("GET", path, res.status, url, body, msg);
+    }
     throw new Error(msg || `GET ${path} failed: ${res.status}`);
   }
   return res.json() as Promise<T>;
 }
 
-export async function apiPost<T>(path: string, body: unknown, init?: RequestInit): Promise<T> {
+export async function apiPost<T>(path: string, body: unknown, init?: ApiOptions): Promise<T> {
   const url = `${API_BASE}${path}`;
+  const { init: fetchInit, silent } = splitInit(init);
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    headers: { "Content-Type": "application/json", ...(fetchInit?.headers || {}) },
     body: JSON.stringify(body),
-    ...init,
+    ...fetchInit,
   });
   if (!res.ok) {
     const { msg, body: resBody } = await parseErrorResponse(res);
-    logApiError("POST", path, res.status, url, resBody, msg);
+    if (!silent.includes(res.status)) {
+      logApiError("POST", path, res.status, url, resBody, msg);
+    }
     throw new Error(msg || `POST ${path} failed: ${res.status}`);
   }
   return res.json() as Promise<T>;
@@ -115,44 +136,53 @@ export async function apiPostWithTimeout<T>(path: string, body: unknown, timeout
   }
 }
 
-export async function apiPatch<T>(path: string, body: unknown, init?: RequestInit): Promise<T> {
+export async function apiPatch<T>(path: string, body: unknown, init?: ApiOptions): Promise<T> {
   const url = `${API_BASE}${path}`;
+  const { init: fetchInit, silent } = splitInit(init);
   const res = await fetch(url, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    headers: { "Content-Type": "application/json", ...(fetchInit?.headers || {}) },
     body: JSON.stringify(body),
-    ...init,
+    ...fetchInit,
   });
   if (!res.ok) {
     const { msg, body: resBody } = await parseErrorResponse(res);
-    logApiError("PATCH", path, res.status, url, resBody, msg);
+    if (!silent.includes(res.status)) {
+      logApiError("PATCH", path, res.status, url, resBody, msg);
+    }
     throw new Error(msg || `PATCH ${path} failed: ${res.status}`);
   }
   return res.json() as Promise<T>;
 }
 
-export async function apiDelete(path: string, init?: RequestInit): Promise<void> {
+export async function apiDelete(path: string, init?: ApiOptions): Promise<void> {
   const url = `${API_BASE}${path}`;
-  const res = await fetch(url, { method: "DELETE", ...init });
+  const { init: fetchInit, silent } = splitInit(init);
+  const res = await fetch(url, { method: "DELETE", ...fetchInit });
   if (!res.ok) {
     const { msg, body } = await parseErrorResponse(res);
-    logApiError("DELETE", path, res.status, url, body, msg);
+    if (!silent.includes(res.status)) {
+      logApiError("DELETE", path, res.status, url, body, msg);
+    }
     throw new Error(msg || `DELETE ${path} failed: ${res.status}`);
   }
 }
 
 /** POST multipart/form-data (e.g. file upload). Do not set Content-Type so browser sets boundary. */
-export async function apiPostFormData<T>(path: string, formData: FormData, init?: RequestInit): Promise<T> {
+export async function apiPostFormData<T>(path: string, formData: FormData, init?: ApiOptions): Promise<T> {
   const url = `${API_BASE}${path}`;
+  const { init: fetchInit, silent } = splitInit(init);
   const res = await fetch(url, {
     method: "POST",
     body: formData,
-    ...init,
-    headers: { ...(init?.headers || {}) },
+    ...fetchInit,
+    headers: { ...(fetchInit?.headers || {}) },
   });
   if (!res.ok) {
     const { msg, body: resBody } = await parseErrorResponse(res);
-    logApiError("POST", path, res.status, url, resBody, msg);
+    if (!silent.includes(res.status)) {
+      logApiError("POST", path, res.status, url, resBody, msg);
+    }
     throw new Error(msg || `POST ${path} failed: ${res.status}`);
   }
   return res.json() as Promise<T>;

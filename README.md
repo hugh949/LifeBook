@@ -1,6 +1,12 @@
-# LifeBook MVP
+# LifeBook
 
-Voice-first, multimodal family memory bank: photos, voice, and a digital memory timeline. Built to **run locally first**, then deploy to **Azure** when you want to share with others.
+A private, voice-first memory keeper. Sign up, record conversations, turn them
+into stories, and share specific memories with whoever you want &mdash; narrated
+in your own cloned voice by a pencil-sketch portrait of yourself. Everything
+stays private until you explicitly share it.
+
+Built to **run locally first**, then deploy to **Azure** when you want to share
+with others.
 
 ---
 
@@ -12,90 +18,122 @@ Voice-first, multimodal family memory bank: photos, voice, and a digital memory 
 # 1. Clone and go to repo root
 cd LifeBook
 
-# 2. Create env (no secrets required for local)
+# 2. Create env (no secrets required for local sign-in / sign-up)
 cp .env.example .env
-# One .env at root for local; same keys go to Azure for production. See docs/Env_Files_Where_to_Edit.md.
+# One .env at root for local; same keys go to Azure for production.
+# See docs/Env_Files_Where_to_Edit.md.
 
 # 3. Start everything
 docker compose up --build
 ```
-(See **`docs/Commands_Reference.md`** for this and other commands — migrations, Voice ID test, etc. — with full paths so you can run from anywhere.)
 
-Then open **http://localhost:3000**. The API is at http://localhost:8000 (health: http://localhost:8000/health).
+See **`docs/Commands_Reference.md`** for related commands (migrations, etc.).
 
-- **Upload a photo:** [Family → Upload](http://localhost:3000/family/upload)
-- **See moments:** [Memory Bank](http://localhost:3000/bank)
-- **Older mode / Talk:** [Older Mode](http://localhost:3000/older) (voice is stubbed until you add an OpenAI key)
+Open **http://localhost:3000**. The API is at `http://localhost:8000`
+(health: `/health`).
 
-No Azure or OpenAI keys are required for this. Uploads use a local stub; Realtime voice returns a “stubbed” message until you set `OPENAI_API_KEY` in `.env`. **Voice ID** (identify speaker at session start) uses **Picovoice Eagle** by default: add `PICOVOICE_ACCESS_KEY` from [Picovoice Console](https://console.picovoice.ai) to enable it; optional `VOICE_ID_BACKEND=azure` if you use Azure Speaker Recognition.
+First visit will land on `/signin` &mdash; follow the link to **Create an
+account**. After that:
 
-**Local validation (Phase 1):** After starting, confirm (1) the app loads at http://localhost:3000, (2) Older → Talk works (or shows the stubbed message), and (3) http://localhost:3000/api/proxy-ping returns 200 and JSON with `"proxy": true`. Then your local environment is working.
+- **Talk**: `/talk` &ndash; record a new conversation with the AI companion.
+- **Library**: `/library` &ndash; review private conversations and stories.
+- **Me**: `/me` &ndash; set up your voice clone and pencil-sketch avatar, or
+  sign out.
+- **Shared link (recipient view)**: `/s/<token>` &ndash; anyone with the link can
+  listen and leave a note; no account needed. If the sender attached a 4-digit
+  code, the recipient enters it here.
+
+No Azure or OpenAI keys are required to sign up and browse locally. For voice
+conversations, narration, and pencil-sketch avatars, add these keys to `.env`:
+
+- `OPENAI_API_KEY` &ndash; Realtime voice agent, default TTS fallback, and
+  `gpt-image-1` pencil-sketch stylization.
+- `ELEVENLABS_API_KEY` &ndash; voice cloning and narration with the user's
+  cloned voice.
+- `AZURE_STORAGE_*` &ndash; audio and photo blob storage. If unset, uploads
+  fall back to a local stub.
+
+**Local validation:** After starting, confirm (1) the app loads at
+http://localhost:3000, (2) you can sign up and reach `/talk`, and (3)
+`http://localhost:3000/api/proxy-ping` returns 200 JSON with `"proxy": true`.
 
 ---
 
 ## Iterate quickly (dev with hot reload)
 
-Use the same stack but mount your code so changes apply without rebuilding:
+Use the same stack; the `docker-compose.override.yml` mounts your code so the
+API and web app live-reload on save.
 
 ```bash
 docker compose up --build
 ```
 
-If you have a `docker-compose.override.yml` in the repo (see below), the API and web app will run with **live reload**: edit files and refresh (or wait for the process to restart).
+---
+
+## When you want feedback from others &rarr; Azure
+
+**First time?** Use **`First_Time_Deploy.md`** &ndash; a step-by-step checklist
+(create resources in West US 3, set GitHub secrets, first deploy, run
+migrations). Do it once.
+
+**After that:** Deployments are driven by **GitHub**. Push to `main` and the
+workflows build and deploy for you.
+
+- **One command:** Run **`./scripts/deploy-to-azure.sh`** to commit (if needed),
+  push to `main`, and get the link to watch the Azure workflow.
+- **Automatic:** Push to `main` &rarr; **Deploy All** runs. Path-specific pushes
+  run only **Deploy Web** or **Deploy API** when appropriate.
+- **Manual:** **Actions** &rarr; **Deploy Web** / **Deploy API** / **Deploy
+  All** &rarr; **Run workflow**.
+
+**Production checklist:** set `SESSION_SECRET` to a long random value
+(`python -c "import secrets; print(secrets.token_urlsafe(64))"`) in Azure
+Configuration before signing anyone up. Changing it later signs every
+user out. Full reference: **`Azure_Deployment_Appendix.md`**.
 
 ---
 
-## When you want feedback from others → Azure
+## Core features
 
-**First time?** Use **`First_Time_Deploy.md`** — a step-by-step checklist (create resources in West US 3, set GitHub secrets, first deploy, run migrations). Do it once.
+LifeBook is a **personal, private** memory app. Every conversation and story is
+private to the user who recorded it; nothing is visible to anyone else unless
+the owner creates a share link.
 
-**After that:** Deployments are driven by **GitHub**. Push to `main` and the workflows build and deploy for you. No need to redeploy from your machine or the Azure Portal for routine releases.
+- **Accounts**: email + password sign-up, HS256 JWT session cookie. Replace the
+  secret in `.env`/`SESSION_SECRET` before production.
+- **Talk**: live voice session with an AI companion via the OpenAI Realtime
+  API. At any point the companion can snapshot the conversation into a titled
+  Story with a short summary.
+- **Library**: browse and play private conversations and stories; delete or
+  continue refining them; see all comments received across share links.
+- **Voice clone (Me &rarr; Voice)**: record 60&ndash;90 seconds once and
+  ElevenLabs creates a cloned voice used for shared narration.
+- **Pencil-sketch avatar (Me &rarr; Avatar)**: upload a selfie; `gpt-image-1`
+  stylizes it to a friendly pencil-sketch portrait. The portrait animates a
+  simple open/closed mouth in time with the narration audio.
+- **Sharing**: create a link for any single conversation or story. Optionally
+  attach a 4-digit code. Recipients open `/s/<token>`, unlock with the code if
+  required, listen to the narration, and leave a named comment the owner can
+  read in their Library. No recipient sign-up required.
 
-- **One command:** Run **`./scripts/deploy-to-azure.sh`** to commit (if needed), push to `main`, and get the link to watch the Azure workflow. See **`scripts/README.md`**.
-- **Automatic:** Push to `main` → **Deploy All** runs (web + API). Path-specific pushes run only **Deploy Web** or **Deploy API** when only that app changed.
-- **Manual:** **Actions** → **Deploy Web** / **Deploy API** / **Deploy All** → **Run workflow**.
-
-Many iterations with early adopters: change code → push → GitHub deploys. Same Azure resources and secrets; only code and config (env vars) when you add new features. Full reference: **`Azure_Deployment_Appendix.md`** (§ 11 GitHub Actions, § 12 production hardening).
-
----
-
-## Core features (discovery phase)
-
-Right now the product is in **discovery**: we’re figuring out which features people find useful. Expect changes.
-
-**Currently in the MVP:**
-
-- One default “family” (no auth yet).
-- Family upload: photo → Azure Blob (or stub) → moment in the bank.
-- Memory bank: list of moments with thumbnails, link to moment detail.
-- Moment detail: photo(s), story/comments, **past recordings** (audio + transcripts when saved).
-- Older mode: Talk (Realtime when OpenAI key set), Memory Trailer placeholder.
-- Shareable moment page: `/m/[momentId]`.
-
-**Shared memory:** Stories, voice recordings, past recordings, photos, and comments are **preserved in Azure** (Postgres + Blob) so the family’s memory is durable and replayable. See **`docs/Data_Preservation_Shared_Memory.md`**.
-
-**Planned after feedback:** Auth, full post-session transcript pipeline, Memory Trailer, and whatever proves most valuable from user feedback.
+See **`docs/Personal_Rearchitecture_Notes.md`** for the data model and
+how the pieces fit together.
 
 ---
 
 ## Docs
 
 | Doc | Purpose |
-|-----|--------|
-| **`First_Time_Deploy.md`** | **First-time Azure deploy checklist + iterating** |
-| **`docs/Commands_Reference.md`** | **When to run what (migrations, Voice ID test, app) — single list with full paths** |
-| **`docs/Env_Files_Where_to_Edit.md`** | **Which .env to edit (root vs services/api vs web)** |
-| **`docs/Data_Preservation_Shared_Memory.md`** | **How stories, voice, photos & transcripts are preserved in Azure** |
+|-----|---------|
+| **`First_Time_Deploy.md`** | First-time Azure deploy checklist + iterating |
+| **`docs/Commands_Reference.md`** | Migrations, local helpers, one-offs |
+| **`docs/Env_Files_Where_to_Edit.md`** | Which `.env` to edit (root vs services/api vs web) |
+| **`docs/Personal_Rearchitecture_Notes.md`** | New data model, auth, sharing |
 | `Azure_Deployment_Appendix.md` | Full Azure reference (secrets, Key Vault, hardening) |
-| `V1_Product_Spec.md` | MVP scope and behaviour |
-| `Product_Vision_Roadmap.md` | Short / medium / long-term vision |
-| `MVP_TODO.md` | Technical task list |
 
 ---
 
-## Optional: run API + web on your machine (no Docker for app code)
-
-If you prefer to run the API and Next.js locally and only use Docker for Postgres:
+## Optional: run API + web without Docker
 
 ```bash
 # Terminal 1: Postgres only
@@ -110,7 +148,8 @@ cd services/api && pip install . && alembic upgrade head && uvicorn app.main:app
 cd apps/web && npm install && npm run dev
 ```
 
-Then open http://localhost:3000. The app uses `/api`, which the runtime proxy forwards to `API_UPSTREAM` (default `http://localhost:8000`).
+Then open http://localhost:3000. The web app uses `/api`, which the runtime
+proxy forwards to `API_UPSTREAM` (default `http://localhost:8000`).
 
 ---
 

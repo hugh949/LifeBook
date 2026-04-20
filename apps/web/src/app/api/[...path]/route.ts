@@ -89,7 +89,7 @@ async function proxy(
     const responseHeaders = new Headers();
     responseHeaders.set(PROXY_HEADER, PROXY_HEADER_VALUE);
 
-    // Forward a few response headers
+    // Forward a few response headers (including Set-Cookie for session auth)
     res.headers.forEach((value, key) => {
       const lower = key.toLowerCase();
       if (
@@ -100,6 +100,20 @@ async function proxy(
         responseHeaders.set(key, value);
       }
     });
+    // Set-Cookie is special: it can appear multiple times; use .append() per value
+    try {
+      const rawGetSetCookie = (res.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie;
+      if (typeof rawGetSetCookie === "function") {
+        for (const sc of rawGetSetCookie.call(res.headers)) {
+          responseHeaders.append("set-cookie", sc);
+        }
+      } else {
+        const sc = res.headers.get("set-cookie");
+        if (sc) responseHeaders.append("set-cookie", sc);
+      }
+    } catch {
+      // ignore set-cookie forwarding failure
+    }
 
     const contentType = (res.headers.get("content-type") || "").toLowerCase();
     const isBinary =
