@@ -1,8 +1,8 @@
-"""SQLAlchemy ORM models for the personal-rearchitecture schema (see migration 017).
+"""SQLAlchemy ORM models for the personal-rearchitecture schema (see migration 017+).
 
-Identity is now per-user (email + password). Everything owned by a user is
-private by default; sharing is opt-in via the ``shares`` table which carries an
-optional 4-digit code gate and can be revoked.
+Identity is per-user (email + password). Everything owned by a user is private
+by default; sharing is opt-in via the ``shares`` table with a required password
+hash and soft revoke.
 """
 import uuid
 from datetime import datetime
@@ -109,7 +109,7 @@ class Transcript(Base):
 
 
 class Story(Base):
-    """Confirmed first-person narrative derived from a conversation."""
+    """Professional story script derived from a conversation (editable; then curated)."""
 
     __tablename__ = "stories"
     id = Column(ID_TYPE, primary_key=True, default=uuid7_str)
@@ -123,6 +123,11 @@ class Story(Base):
     tags_json = Column(JSONB)
     narration_asset_id = Column(ID_TYPE, ForeignKey("assets.id", ondelete="SET NULL"), nullable=True)
     bgm_asset_id = Column(ID_TYPE, ForeignKey("assets.id", ondelete="SET NULL"), nullable=True)
+    # Curator choices (music mood + speaking style for listen-back)
+    bgm_track = Column(String(32), nullable=True)  # none | neutral | warm | reflective | nostalgic
+    narration_tone = Column(String(64), nullable=True)  # warm | gentle | clear | lively | …
+    # Optional single photo for Curate / share (one per script)
+    photo_asset_id = Column(ID_TYPE, ForeignKey("assets.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
@@ -136,7 +141,7 @@ class Share(Base):
     owner_user_id = Column(ID_TYPE, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     target_type = Column(String(16), nullable=False)  # conversation | story
     target_id = Column(ID_TYPE, nullable=False)
-    code_hash = Column(String(128), nullable=True)  # sha256(id:code) if a 4-digit code was set
+    code_hash = Column(String(128), nullable=True)  # sha256(id:password); required for new shares
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -159,3 +164,25 @@ class StoryBgmCache(Base):
     story_id = Column(ID_TYPE, ForeignKey("stories.id", ondelete="CASCADE"), primary_key=True)
     asset_id = Column(ID_TYPE, ForeignKey("assets.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class UserPreferences(Base):
+    """Chief-of-Staff preference / correction memory (1-1 with User)."""
+
+    __tablename__ = "user_preferences"
+    user_id = Column(ID_TYPE, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    prefs_json = Column(JSONB, nullable=False, default=dict)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PasswordResetToken(Base):
+    """One-time token for forgotten-password reset (hashed at rest)."""
+
+    __tablename__ = "password_reset_tokens"
+    id = Column(ID_TYPE, primary_key=True, default=uuid7_str)
+    user_id = Column(ID_TYPE, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token_hash = Column(String(128), nullable=False, unique=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+

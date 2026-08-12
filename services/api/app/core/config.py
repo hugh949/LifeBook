@@ -20,8 +20,17 @@ class Settings(BaseModel):
     read_sas_ttl_minutes: int = int(os.getenv("AZURE_STORAGE_READ_SAS_TTL_MINUTES", "60"))
 
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    # Per-agent models — see app.core.openai_models. Empty → role default
+    # (OPENAI_TEXT_MODEL is a shared fallback for text roles when role-specific is unset).
     openai_realtime_model: str = os.getenv("OPENAI_REALTIME_MODEL", "")
     openai_text_model: str = os.getenv("OPENAI_TEXT_MODEL", "")
+    openai_storyteller_model: str = os.getenv("OPENAI_STORYTELLER_MODEL", "")
+    openai_curator_model: str = os.getenv("OPENAI_CURATOR_MODEL", "")
+    openai_curator_tts_model: str = os.getenv("OPENAI_CURATOR_TTS_MODEL", "") or os.getenv(
+        "OPENAI_TTS_MODEL", ""
+    )
+    openai_content_manager_model: str = os.getenv("OPENAI_CONTENT_MANAGER_MODEL", "")
+    openai_chief_of_staff_model: str = os.getenv("OPENAI_CHIEF_OF_STAFF_MODEL", "")
 
     # ElevenLabs: AI music generation for narration BGM (Music API)
     elevenlabs_api_key: str = os.getenv("ELEVENLABS_API_KEY", "")
@@ -34,5 +43,16 @@ class Settings(BaseModel):
     # Picovoice Eagle (Voice ID): default backend when key is set
     picovoice_access_key: str = os.getenv("PICOVOICE_ACCESS_KEY", "")
     voice_id_backend: str = os.getenv("VOICE_ID_BACKEND", "eagle")  # "eagle" | "azure"
+
+    # Public web origin for password-reset links (e.g. http://localhost:3000)
+    public_app_url: str = os.getenv("PUBLIC_APP_URL", "http://localhost:3000")
+
+    # Optional SMTP for password-reset emails (if unset, local/dev returns a reset link in JSON)
+    smtp_host: str = os.getenv("SMTP_HOST", "")
+    smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user: str = os.getenv("SMTP_USER", "")
+    smtp_password: str = os.getenv("SMTP_PASSWORD", "")
+    smtp_from: str = os.getenv("SMTP_FROM", "")
+    smtp_use_tls: bool = os.getenv("SMTP_USE_TLS", "true").lower() in ("1", "true", "yes")
 
 settings = Settings()

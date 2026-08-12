@@ -63,7 +63,7 @@ session cookie, verifies the JWT, and loads the user.
 
 | Route | Public? | Notes |
 |-------|---------|-------|
-| `/signin`, `/signup` | yes | Email + password |
+| `/signin`, `/signup`, `/forgot-password`, `/reset-password` | yes | Email + password; forgot/reset |
 | `/` | &mdash; | Redirects to `/talk` |
 | `/talk` | no | Single-screen voice session; agent calls `confirm_story` |
 | `/library` | no | Lists conversations + stories |
@@ -72,29 +72,25 @@ session cookie, verifies the JWT, and loads the user.
 | `/me` | no | Account, voice status, avatar status, sign out |
 | `/me/voice` | no | Five-state wizard |
 | `/me/avatar` | no | Selfie upload + pencil-sketch preview |
-| `/s/[token]` | yes | Recipient view: optional code gate, cloned-voice narration, comment form |
+| `/s/[token]` | yes | Recipient view: password unlock, narration + BGM, comments after unlock |
 
 `apps/web/src/middleware.ts` enforces auth for any non-public path. Public
-paths: `/signin`, `/signup`, `/s/*`, `/api/*`, `_next/*`, favicon.
+paths: `/signin`, `/signup`, `/s/*`, `/bgm/*`, `/api/*`, `_next/*`, favicon.
 
 ## Sharing flow
 
-1. Owner hits Share on a conversation/story detail page. `ShareSheet` POSTs
-   to `/shares` with `target_type`, `target_id`, optional 4-digit `code`.
-   Server stores a URL-safe token (the row's primary key) and
-   `sha256("{token}:{code}")` in `code_hash`.
-2. Copyable URL is `${window.origin}/s/${token}`.
+1. Owner opens **Share when ready** on a detail page. `ShareSheet` POSTs to
+   `/shares` with `target_type`, `target_id`, and a **required** `password`.
+   Server stores a URL-safe token and `sha256("{token}:{password}")` in `code_hash`.
+2. Copyable URL is `${window.origin}/s/${token}`. Owner can **change password**
+   (`PATCH /shares/{token}`) or **remove access** (`DELETE`) without recreating the story.
 3. Recipient opens `/s/[token]`:
-   - `GET /shares/{token}` &rarr; meta (title, owner display name,
-     `requires_code`, pencil avatar URL, teaser).
-   - If code required: recipient types 4 digits &rarr; `POST
-     /shares/{token}/unlock` returns the full `PlaybackOut`.
-   - Otherwise `GET /shares/{token}/playback` returns it automatically.
-4. The `<audio>` element streams `/shares/{token}/narration` (code appended
-   as `?code=` when required). Server calls ElevenLabs with the owner's
-   cloned `voice_id` if present; falls back to OpenAI TTS otherwise.
-5. Recipient may leave a named comment via `POST /shares/{token}/comments`;
-   owner sees it aggregated on the target detail page via `/library/{kind}/{id}/comments`.
+   - `GET /shares/{token}` &rarr; minimal meta (owner name only; no teaser).
+   - Recipient enters password &rarr; `POST /shares/{token}/unlock` returns `PlaybackOut`.
+4. The `<audio>` element streams `/shares/{token}/narration?password=…`.
+5. Comments require the same password. Owner sees them on the detail page.
+
+See also [Five_Agent_Architecture.md](Five_Agent_Architecture.md).
 
 ## Avatar animation
 
@@ -132,8 +128,8 @@ needs `AZURE_STORAGE_*`.
 
 Deliberately simple:
 
-- 4-digit codes, not full passwords on share links. Rate-limited to 5
-  attempts / 30s per token.
+- Share links always require a user-chosen password (not optional). Rate-limited
+  to 5 failed attempts / 30s per token.
 - Soft-delete keeps data around; there is no user-facing data export or
   "delete my account" flow yet.
 - Lip-sync is amplitude-based, not phoneme-accurate. Good enough for a

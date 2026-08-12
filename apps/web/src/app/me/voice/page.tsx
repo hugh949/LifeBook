@@ -137,7 +137,7 @@ export default function VoicePage() {
   };
 
   const remove = async () => {
-    if (!confirm("Delete your cloned voice? Shared stories will fall back to the default narration voice.")) return;
+    if (!confirm("Delete your cloned voice? Narrations will fall back to the default voice.")) return;
     try {
       const res = await fetch(`${API_BASE}/me/voice`, { method: "DELETE" });
       if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
@@ -166,8 +166,8 @@ export default function VoicePage() {
       <p style={{ marginBottom: 10 }}><Link href="/me">← Me</Link></p>
       <h1 className="page-title">Your voice</h1>
       <p className="page-lead">
-        Record about a minute of clear speech. We&rsquo;ll use it to narrate the stories you
-        share &mdash; in your own voice.
+        Record about a minute of clear speech. We&rsquo;ll use it so you can listen to your own
+        stories in your voice.
       </p>
 
       {error ? <div className="msg msg-error" role="alert" style={{ marginBottom: 12 }}>{error}</div> : null}
@@ -223,7 +223,7 @@ export default function VoicePage() {
         <div className="card stack-12">
           <div className="msg msg-success">Your voice clone is ready.</div>
           <p className="text-muted" style={{ margin: 0, fontSize: 14 }}>
-            Shared stories will be narrated in your voice.
+            Your stories can be narrated in your voice when you listen privately or share.
           </p>
           <div className="btn-row">
             <button className="btn btn-primary" onClick={playSample}>Play sample</button>

@@ -95,7 +95,12 @@ async function proxy(
       if (
         lower === "content-type" ||
         lower === "cache-control" ||
-        lower === "access-control-allow-origin"
+        lower === "access-control-allow-origin" ||
+        lower === "access-control-expose-headers" ||
+        // Curate Listen / share narration: voice mode + soft-fail notes
+        lower === "x-narration-voice" ||
+        lower === "x-narration-note" ||
+        lower === "x-narration-tone"
       ) {
         responseHeaders.set(key, value);
       }

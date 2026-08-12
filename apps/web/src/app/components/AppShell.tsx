@@ -9,6 +9,8 @@ import BottomNav from "./BottomNav";
 const PUBLIC_PATH_PATTERNS: RegExp[] = [
   /^\/signin$/,
   /^\/signup$/,
+  /^\/forgot-password$/,
+  /^\/reset-password$/,
   /^\/s(?:\/|$)/,
 ];
 
@@ -22,8 +24,13 @@ function AuthedChrome({ children }: { children: React.ReactNode }) {
   const { loading } = useAuth();
 
   if (publicPage) {
-    // Public pages (signin/signup/share) render without the authed chrome
-    return <div className="app-shell">{children}</div>;
+    // Share links: minimal listen shell (no app chrome). Auth pages keep a simple shell.
+    const isShare = /^\/s(?:\/|$)/.test(pathname || "");
+    return (
+      <div className={isShare ? "share-shell" : "app-shell"}>
+        {isShare ? <div className="share-main">{children}</div> : children}
+      </div>
+    );
   }
 
   if (loading) {

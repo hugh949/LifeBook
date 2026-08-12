@@ -11,6 +11,7 @@ from app.routers import (
     health,
     library,
     me_avatar,
+    me_preferences,
     me_voice,
     media,
     realtime,
@@ -79,6 +80,7 @@ app.include_router(realtime.router)
 app.include_router(sessions.router)
 app.include_router(me_voice.router)
 app.include_router(me_avatar.router)
+app.include_router(me_preferences.router)
 app.include_router(library.router)
 app.include_router(shares.router)
 

@@ -1,4 +1,4 @@
-import { apiPost } from "./api";
+import { apiPost, apiGet } from "./api";
 
 export type RealtimeTokenResponse = {
   value?: string;
@@ -6,11 +6,13 @@ export type RealtimeTokenResponse = {
   model?: string;
   expires_at?: number;
   stubbed?: boolean;
+  mode?: "conversing" | "storytelling" | "curating";
 };
 
 export type RealtimeTokenRequest = {
-  conversation_id?: string;  // recall a past conversation
-  story_id?: string;         // refine an existing story
+  conversation_id?: string;
+  story_id?: string;
+  mode?: "conversing" | "storytelling" | "curating";
 };
 
 export async function getRealtimeToken(
@@ -19,7 +21,24 @@ export async function getRealtimeToken(
   return apiPost<RealtimeTokenResponse>("/realtime/token", {
     conversation_id: options.conversation_id ?? undefined,
     story_id: options.story_id ?? undefined,
+    mode: options.mode ?? undefined,
   });
+}
+
+export type AgentPack = {
+  mode: "conversing" | "storytelling" | "curating";
+  instructions: string;
+  tools: unknown[];
+};
+
+export async function getAgentPack(
+  mode: "conversing" | "storytelling" | "curating",
+  options: { conversation_id?: string; story_id?: string } = {}
+): Promise<AgentPack> {
+  const qs = new URLSearchParams({ mode });
+  if (options.conversation_id) qs.set("conversation_id", options.conversation_id);
+  if (options.story_id) qs.set("story_id", options.story_id);
+  return apiGet<AgentPack>(`/realtime/agent-pack?${qs.toString()}`);
 }
 
 /**

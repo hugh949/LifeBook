@@ -69,6 +69,9 @@ function SigninInner() {
           {submitting ? "Signing in…" : "Sign in"}
         </button>
         <p className="text-muted center" style={{ margin: 0, fontSize: 14 }}>
+          <Link href="/forgot-password">Forgot password?</Link>
+        </p>
+        <p className="text-muted center" style={{ margin: 0, fontSize: 14 }}>
           New here? <Link href={`/signup${next ? `?next=${encodeURIComponent(next)}` : ""}`}>Create an account</Link>
         </p>
       </form>

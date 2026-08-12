@@ -44,7 +44,7 @@ function SignupInner() {
   return (
     <div className="app-main" style={{ maxWidth: 420 }}>
       <h1 className="page-title">Start your LifeBook</h1>
-      <p className="page-lead">Your stories are private by default. Share only when you choose.</p>
+      <p className="page-lead">Your stories are private by default. Talk, shape a story, listen — share only when you choose.</p>
       <form onSubmit={onSubmit} className="card stack-12" noValidate>
         <label className="field">
           <span className="label-text">Your name</span>

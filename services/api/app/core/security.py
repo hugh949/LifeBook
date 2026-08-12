@@ -1,7 +1,6 @@
 """Session security: bcrypt password hashing + HS256 JWT cookie tokens.
 
-Pilot-grade. No email verification, password reset, or MFA; those are tracked
-for the production phase.
+Password reset uses hashed one-time tokens (see ``/auth/forgot-password``).
 """
 from __future__ import annotations
 

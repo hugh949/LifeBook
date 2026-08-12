@@ -11,7 +11,11 @@ const SESSION_COOKIE = process.env.NEXT_PUBLIC_SESSION_COOKIE || "lb_session";
 const PUBLIC_PATHS: RegExp[] = [
   /^\/signin$/,
   /^\/signup$/,
+  /^\/forgot-password$/,
+  /^\/reset-password$/,
   /^\/s(?:\/|$)/,
+  // Share-page BGM loops under apps/web/public/bgm (recipients have no session)
+  /^\/bgm\//,
   /^\/favicon\.ico$/,
   /^\/_next\//,
   /^\/api\//,

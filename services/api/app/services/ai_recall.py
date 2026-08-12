@@ -1,10 +1,13 @@
 """AI-derived recall label: summary and topic tags from participant text (OpenAI). Multilingual-friendly."""
 import json
-import logging
 import re
-import httpx
 
-logger = logging.getLogger(__name__)
+from app.core.openai_models import (
+    content_manager_model,
+    curator_model,
+    storyteller_model,
+)
+from app.services.openai_chat import chat_text
 
 SYSTEM_PROMPT = """You are a helper that creates short labels for voice conversation recall.
 Given only what the person (the user) said in a conversation, output:
@@ -13,47 +16,32 @@ Given only what the person (the user) said in a conversation, output:
 Output valid JSON only, no markdown: {"summary": "...", "tags": ["tag1", "tag2", ...]}"""
 
 
-def generate_recall_label(participant_text: str, api_key: str, model: str) -> tuple[str | None, list[str]]:
+def generate_recall_label(participant_text: str, api_key: str, model: str = "") -> tuple[str | None, list[str]]:
     """
     Call OpenAI to produce a one-line summary and topic tags from participant-only text.
     Returns (summary, tags). On failure or empty input, returns (None, []).
     Multilingual: model uses same language as input.
+    Uses Content Manager (Agent 4) model by default — light inventory labeling.
     """
     text = (participant_text or "").strip()
     if not text or not api_key:
         return None, []
 
-    payload = {
-        "model": model or "gpt-4o-mini",
-        "messages": [
+    content = chat_text(
+        api_key=api_key,
+        model=content_manager_model(model),
+        messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": text[:8000]},  # cap length
+            {"role": "user", "content": text[:8000]},
         ],
-        "max_tokens": 200,
-        "temperature": 0.3,
-    }
-
-    try:
-        with httpx.Client() as client:
-            r = client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=15.0,
-            )
-        r.raise_for_status()
-        data = r.json()
-        choice = (data.get("choices") or [None])[0]
-        if not choice:
-            return None, []
-        content = (choice.get("message") or {}).get("content") or ""
-        return _parse_response(content)
-    except Exception as e:
-        logger.warning("ai_recall: OpenAI call failed: %s", e)
+        max_completion_tokens=400,
+        temperature=0.3,
+        reasoning_effort="none",
+        log_label="ai_recall.generate_recall_label",
+    )
+    if not content:
         return None, []
+    return _parse_response(content)
 
 
 STORY_TITLE_PROMPT = """You are a helper that creates a short, descriptive title for a family story.
@@ -61,100 +49,104 @@ Given the story text (from a voice conversation or narrative), output a single l
 Output only the title line, nothing else."""
 
 
-def generate_story_title(story_content: str, api_key: str, model: str) -> str | None:
+def generate_story_title(story_content: str, api_key: str, model: str = "") -> str | None:
     """
     Call OpenAI to produce a short title (4–10 words) from story content.
     Returns the title string or None on failure/empty input.
+    Uses Storyteller (Agent 2) model by default.
     """
     text = (story_content or "").strip()
     if not text or not api_key:
         return None
-    payload = {
-        "model": model or "gpt-4o-mini",
-        "messages": [
+    title = chat_text(
+        api_key=api_key,
+        model=storyteller_model(model),
+        messages=[
             {"role": "system", "content": STORY_TITLE_PROMPT},
             {"role": "user", "content": text[:6000]},
         ],
-        "max_tokens": 60,
-        "temperature": 0.3,
-    }
-    try:
-        with httpx.Client() as client:
-            r = client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=15.0,
-            )
-        r.raise_for_status()
-        data = r.json()
-        choice = (data.get("choices") or [None])[0]
-        if not choice:
-            return None
-        title = (choice.get("message") or {}).get("content") or ""
-        title = title.strip().strip('"').strip()
-        return title if title else None
-    except Exception as e:
-        logger.warning("ai_recall: generate_story_title failed: %s", e)
+        max_completion_tokens=200,
+        temperature=0.3,
+        reasoning_effort="none",
+        log_label="ai_recall.generate_story_title",
+    )
+    if not title:
         return None
+    title = title.strip().strip('"').strip()
+    return title if title else None
 
 
-NARRATE_MUSIC_PROMPT_SYSTEM = """You create a short prompt for an AI music generator. The music will play softly under a spoken family story (voiceover).
+NARRATE_MUSIC_PROMPT_SYSTEM = """You write a short prompt for an AI music generator. The music is a soft looping bed under a spoken personal/family story (voiceover).
 
-Given the story text below:
-1. Infer its language and cultural context (e.g. Spanish, family in Mexico; Urdu, South Asian family).
-2. Infer emotional tone and atmosphere (e.g. nostalgic, tender, warm, reflective).
-3. Output 1-3 sentences that describe the ideal background music. Be specific: instruments (e.g. soft piano, gentle strings), mood, tempo (e.g. 60 bpm), and cultural/language appropriateness. You MUST include: "instrumental only", "no vocals", and "suitable for voiceover" or "suitable for narration". Keep the whole prompt under 200 characters if possible."""
+From the story title/body/summary, infer:
+1) Place / region — where it likely happened (city, countryside, country, cultural region). If unclear, use a gentle universal bed.
+2) Era / decade — when it likely happened (e.g. 1950s, 1970s, early 2000s, wartime). Use dates, ages, tech, clothing, or cultural cues; if unclear, prefer timeless acoustic warmth.
+3) Language / cultural feel — instruments and textures that fit that place and era (period-appropriate, not parody).
+4) Emotional tone — nostalgic, tender, warm, reflective, etc.
+
+Write 1–3 sentences describing the ideal instrumental bed:
+- Name place + era when you can infer them (e.g. "rural Punjab, late 1970s" or "coastal California, mid-1990s").
+- Specify period instruments / textures and a slow-to-moderate tempo (about 50–70 bpm).
+- Keep volume and arrangement sparse so speech stays clear — gentle, not cinematic or overpowering.
+- MUST include: "instrumental only", "no vocals", and "suitable for voiceover" (or "suitable for narration").
+- No famous song titles, lyrics, or artist names.
+Keep the whole prompt under ~280 characters when possible."""
 
 
-def generate_narrate_music_prompt(story_text: str, api_key: str, model: str) -> str:
+def generate_narrate_music_prompt(
+    story_text: str,
+    api_key: str,
+    model: str = "",
+    *,
+    title: str = "",
+    summary: str = "",
+) -> str:
     """
-    Produce a music-generation prompt from the full story for synthetic BGM.
-    Returns a short paragraph for the music model (instruments, mood, culture, voiceover-safe).
+    Produce a music-generation prompt from the story for synthetic BGM.
+    Steers toward era- and place-appropriate instrumental beds when cues exist.
     On failure or empty input, returns a safe default prompt.
+    Uses Curator (Agent 3) model by default.
     """
-    text = (story_text or "").strip()
-    default_prompt = "Soft ambient piano, gentle, 60 bpm, instrumental only, no vocals, suitable for voiceover."
-    if not text or not api_key:
+    body = (story_text or "").strip()
+    title_s = (title or "").strip()
+    summary_s = (summary or "").strip()
+    default_prompt = (
+        "Soft ambient piano, gentle timeless warmth, 60 bpm, "
+        "instrumental only, no vocals, suitable for voiceover."
+    )
+    if not api_key or not (body or title_s or summary_s):
         return default_prompt
-    payload = {
-        "model": model or "gpt-4o-mini",
-        "messages": [
+
+    parts: list[str] = []
+    if title_s:
+        parts.append(f"Title: {title_s}")
+    if summary_s:
+        parts.append(f"Summary: {summary_s[:800]}")
+    if body:
+        parts.append(f"Story:\n{body[:3500]}")
+    user_blob = "\n\n".join(parts)
+
+    content = chat_text(
+        api_key=api_key,
+        model=curator_model(model),
+        messages=[
             {"role": "system", "content": NARRATE_MUSIC_PROMPT_SYSTEM},
-            {"role": "user", "content": text[:4000]},
+            {"role": "user", "content": user_blob[:4200]},
         ],
-        "max_tokens": 150,
-        "temperature": 0.3,
-    }
-    try:
-        with httpx.Client() as client:
-            r = client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=15.0,
-            )
-        r.raise_for_status()
-        data = r.json()
-        choice = (data.get("choices") or [None])[0]
-        if not choice:
-            return default_prompt
-        content = (choice.get("message") or {}).get("content") or ""
-        prompt = content.strip().strip('"').strip()
-        if not prompt or len(prompt) > 500:
-            return default_prompt
-        if "instrumental" not in prompt.lower() and "no vocals" not in prompt.lower():
-            prompt = prompt.rstrip(".") + ". Instrumental only, no vocals, suitable for voiceover."
-        return prompt
-    except Exception as e:
-        logger.warning("ai_recall: generate_narrate_music_prompt failed: %s", e)
+        max_completion_tokens=300,
+        temperature=0.35,
+        reasoning_effort="none",
+        log_label="ai_recall.generate_narrate_music_prompt",
+    )
+    if not content:
         return default_prompt
+    prompt = content.strip().strip('"').strip()
+    if not prompt or len(prompt) > 600:
+        return default_prompt
+    low = prompt.lower()
+    if "instrumental" not in low and "no vocals" not in low:
+        prompt = prompt.rstrip(".") + ". Instrumental only, no vocals, suitable for voiceover."
+    return prompt
 
 
 # Curated tracks for narration BGM. AI reviews the full story and picks the best match.
@@ -186,46 +178,32 @@ neutral — Calm and unobtrusive. For mixed or general stories where no single m
 Reply with valid JSON only, no markdown: {"track_id": "<one of the ids above>", "music_brief": "<one short sentence explaining why this track fits this story>"}"""
 
 
-def generate_narrate_mood(story_text: str, api_key: str, model: str) -> tuple[str, str]:
+def generate_narrate_mood(story_text: str, api_key: str, model: str = "") -> tuple[str, str]:
     """
     AI-driven: review the full narration and pick the best background music track.
     Returns (track_id, music_brief). track_id is one of the registry ids (e.g. reflective, warm).
     On failure or empty input, returns ("neutral", "").
+    Uses Curator (Agent 3) model by default.
     """
     text = (story_text or "").strip()
     if not text or not api_key:
         return "neutral", ""
-    payload = {
-        "model": model or "gpt-4o-mini",
-        "messages": [
+    content = chat_text(
+        api_key=api_key,
+        model=curator_model(model),
+        messages=[
             {"role": "system", "content": NARRATE_MUSIC_SELECTION_PROMPT},
             {"role": "user", "content": text[:6000]},
         ],
-        "max_tokens": 120,
-        "temperature": 0.2,
-    }
-    try:
-        with httpx.Client() as client:
-            r = client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=15.0,
-            )
-        r.raise_for_status()
-        data = r.json()
-        choice = (data.get("choices") or [None])[0]
-        if not choice:
-            return "neutral", ""
-        content = (choice.get("message") or {}).get("content") or ""
-        track_id, music_brief = _parse_narrate_music_response(content)
-        return track_id, music_brief
-    except Exception as e:
-        logger.warning("ai_recall: generate_narrate_mood failed: %s", e)
+        max_completion_tokens=300,
+        temperature=0.2,
+        reasoning_effort="none",
+        log_label="ai_recall.generate_narrate_mood",
+    )
+    if not content:
         return "neutral", ""
+    track_id, music_brief = _parse_narrate_music_response(content)
+    return track_id, music_brief
 
 
 def _parse_narrate_music_response(content: str) -> tuple[str, str]:

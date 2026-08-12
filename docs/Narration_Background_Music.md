@@ -1,51 +1,32 @@
-# Narration background music (Shared Memories)
+# Narration background music (Curate + Share)
 
-When a user taps **Narrate Story** in Shared Memories, the app plays TTS narration with **synthetically generated** background music that is unique per story, culture- and language-aware, and fits the narrative.
+Curate Listen and share playback use **dual client audio**: narration MP3 + a background bed.
 
-## How it works
+## How it works (current)
 
-1. **BGM request** – Frontend calls **POST /voice/narrate/bgm** with `{ moment_id, text }` in parallel with TTS.
-2. **Cache** – If this moment already has generated BGM, the API returns a signed playback URL immediately.
-3. **Cache miss** – The backend:
-   - Uses the LLM to produce a **music generation prompt** from the full story (instruments, mood, tempo, cultural/language context; always includes "instrumental only", "no vocals", "suitable for voiceover").
-   - Calls **ElevenLabs Music API** (`POST https://api.elevenlabs.io/v1/music`) with that prompt to generate ~60s of instrumental audio (MP3).
-   - Uploads the audio to **Azure Blob** (audio container), creates an **Asset** record, and stores the mapping in **narrate_bgm_cache** (moment_id → asset_id).
-   - Returns a signed playback URL.
-4. **Playback** – Frontend plays TTS and BGM together (BGM at 0.2 volume, looped). If the BGM endpoint returns `url: null`, narration plays without music.
-
-## Loudness (LUFS)
-
-Narration and BGM are normalized to consistent loudness so the voice sits clearly above the music:
-
-- **Narration (OpenAI TTS):** **-16 LUFS** (integrated loudness). Applied to the TTS response before returning.
-- **Music (ElevenLabs BGM):** **-24 LUFS**. Applied to the generated BGM before upload to Azure.
-
-Normalization is done with ffmpeg’s `loudnorm` filter. If ffmpeg is unavailable, the API returns the original audio unchanged.
-
-## External services
-
-| Service      | Purpose                    | Env var               |
-|-------------|----------------------------|------------------------|
-| ElevenLabs  | Music generation (Music API) | `ELEVENLABS_API_KEY` |
-| OpenAI      | Music prompt from story    | `OPENAI_API_KEY`      |
-| Azure Blob  | Store generated audio      | `AZURE_STORAGE_*`     |
+1. **Auto-curate** – Entering Curate calls **POST /library/stories/{id}/curate/suggest**. The Curator model (or heuristics) picks `bgm_track` + `narration_tone`, persists them, and returns a short reason.
+2. **Unique bed (preferred when configured)** – If `ELEVENLABS_API_KEY` and Azure Blob are set, suggest kicks off background generation via ElevenLabs Music API (`music_generation.py`, ~**15s** instrumental loop to limit Music credits). The Curator music prompt (`generate_narrate_music_prompt`) infers likely **place/region** and **era/decade** from title/body/summary so the bed feels of that time and place (period instruments/atmosphere, still soft under speech). Uploads to the audio container and caches in `story_bgm_cache` / `stories.bgm_asset_id`. Preview/share return `bgm_url` (signed). Client loops the bed under narration. Cached so Listen does not regenerate.
+3. **Library fallback** – Static loops in `apps/web/public/bgm/{neutral,warm,reflective,nostalgic}.mp3`. Client plays under narration. Voice delivery stays unique via per-story TTS tone instructions even when the bed is from the small library.
+4. **Agent adjust** – Curator Realtime tool `set_curate_choice` patches mood/tone; changing mood clears a unique bed so the new library mood applies. User steers by conversation (no chip grid).
+5. **Voice** – Enrolled clone (`UserVoice.elevenlabs_voice_id`, `clone_status=ready`) is used for Listen/share TTS. Failures fall back to OpenAI TTS with an explicit note header — never silent pretend.
 
 ## Configuration
 
-- **ELEVENLABS_API_KEY** – Required for BGM generation. Get an API key from [ElevenLabs](https://elevenlabs.io). Auth header: `xi-api-key`. If unset, the BGM endpoint returns `{ "url": null }` and narration plays without music.
-- **Azure storage** – Must be configured to store generated BGM. If not set, generation runs but upload is skipped and the API returns `url: null`.
+| Service | Purpose | Env |
+|---------|---------|-----|
+| ElevenLabs Music | Unique generative beds | `ELEVENLABS_API_KEY` (Music credits required) |
+| ElevenLabs TTS | Cloned narration voice | same key |
+| OpenAI | Curate pick + music prompt + TTS fallback | `OPENAI_API_KEY` |
+| Azure Blob | Store generated BGM | `AZURE_STORAGE_*` |
+
+Without ElevenLabs Music credits / Azure, Curate still works with library beds + agent-led tone/music picks.
 
 ## API
 
-- **POST /voice/narrate/bgm** – Body: `{ "moment_id": "<uuid>", "text": "full story narration" }`. Returns `{ "url": "<signed playback URL>" }` or `{ "url": null }` on failure or when ElevenLabs/Azure are not configured. Cached per moment_id.
-- **POST /voice/narrate/mood** – Deprecated. Previously returned a static track id for curated BGM; use `/narrate/bgm` for synthetic BGM.
+- **POST /library/stories/{id}/curate/suggest** – auto-apply (or return current) curation; optional background generate.
+- **GET /library/stories/{id}/preview** – `bgm_track`, optional `bgm_url`, voice enrollment snapshot.
+- **GET /library/stories/{id}/narration** – MP3; headers `X-Narration-Voice` (`cloned` \| `default` \| `default_fallback`), optional `X-Narration-Note`.
 
-## Latency and cost
+## Legacy
 
-- **First narration of a story:** BGM generation can take ~30–90s (LLM prompt 2–5s, ElevenLabs Music 30–90s, upload 2–5s). Frontend waits for both TTS and BGM in parallel, so total wait is roughly max(TTS, BGM).
-- **Subsequent narrations:** BGM is cached; only TTS is requested (~5–15s).
-- **Cost:** ElevenLabs Music API usage per generation; OpenAI prompt ~\$0.001; Azure storage minimal.
-
-## Database
-
-- **narrate_bgm_cache** – Table: `moment_id` (PK), `asset_id` (FK to assets), `created_at`. One row per moment that has generated BGM.
+Older Shared Memories docs referenced **POST /voice/narrate/bgm** and `narrate_bgm_cache` (moments). That path is superseded by story Curate + `story_bgm_cache`.

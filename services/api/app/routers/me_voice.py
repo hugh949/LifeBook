@@ -145,12 +145,26 @@ async def create_clone(
     except httpx.HTTPStatusError as e:
         msg = (e.response.text or str(e))[:400]
         row.clone_status = "failed"
+        detail_code = ""
+        try:
+            detail_code = str((e.response.json().get("detail") or {}).get("status") or "")
+        except Exception:
+            detail_code = ""
         if e.response.status_code == 422:
             row.clone_error = "That recording didn't work for cloning. Try again with 1+ minute of clearer speech."
+        elif e.response.status_code in (401, 403):
+            row.clone_error = "Voice cloning isn’t available with the current account or API key."
+        elif e.response.status_code == 429:
+            row.clone_error = "Voice service is busy or out of credits. Try again later."
+        elif e.response.status_code == 400 and detail_code == "voice_limit_reached":
+            row.clone_error = (
+                "Voice slots are full on this account. Remove an unused voice in ElevenLabs, then try again."
+            )
         else:
-            row.clone_error = "ElevenLabs error: " + msg
+            row.clone_error = "Couldn’t create your voice right now. Please try again."
+            logger.warning("me/voice/clone: ElevenLabs HTTP %s: %s", e.response.status_code, msg)
         db.commit()
-        raise HTTPException(status_code=400 if e.response.status_code == 422 else 502, detail=row.clone_error)
+        raise HTTPException(status_code=400 if e.response.status_code in (400, 422) else 502, detail=row.clone_error)
     except Exception as e:
         logger.exception("me/voice/clone: %s", e)
         row.clone_status = "failed"

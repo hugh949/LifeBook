@@ -1,10 +1,10 @@
 """Mint OpenAI Realtime client secrets and proxy SDP for authenticated users.
 
-Scope is a single personal session: no family, no shared-story tools, no
-participant model. The agent can help the user turn a conversation into a story
-via `confirm_story` but all content stays private to the user.
+Chief-of-Staff selects an agent instruction pack (Conversation / Storyteller / Curator).
+Sharing tools are never exposed here — access control is Agent 4 (REST only).
 """
 import logging
+from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,36 +13,43 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.openai_models import realtime_model
 from app.core.security import get_current_user
 from app.db import models
 from app.db.session import get_db
+from app.services.narration import voice_enrollment_snapshot
+from app.services.agent_packs import (
+    AgentMode,
+    instructions_for_mode,
+    normalize_mode,
+    tools_for_mode,
+)
+from app.services.user_preferences import preference_notes_for_prompt
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/realtime", tags=["realtime"])
 
 
-REALTIME_INSTRUCTIONS = """You are a warm, gentle voice companion in a personal memory app. You help the person feel heard and support them in capturing and shaping their own stories.
-- Do not speak until the user has spoken first. Greet briefly when they do and wait.
-- When the user ends the session (says goodbye or disconnects), stop speaking immediately.
-- Use a warm, validating tone. Reflect feelings first (e.g. "That sounds important to you").
-- Ask one question at a time and wait for the answer.
-- Do not test memory or correct facts. Never argue about what happened.
-- Keep responses concise and easy to follow. Support multiple languages if the user switches.
-- When the user asks to "turn this into a story" or says something like "let's make a story out of this", craft a short warm first-person narrative from what they shared and speak it. They can ask for changes; revise and repeat. When they say they're happy (e.g. "that's good", "save it"), you MUST first SPEAK one short sentence so they know to wait—e.g. "I'm going to save your story now; please wait a moment." Only after saying that, call the `confirm_story` tool with the exact final narrative text. After the tool returns, SPEAK again to confirm it's saved and tell them they can find it under Library, and share it from there. Never leave a long silence around saving."""
-
-
 class TokenRequest(BaseModel):
-    conversation_id: str | None = None  # recall a past conversation
-    story_id: str | None = None  # refine an existing story
+    conversation_id: str | None = None
+    story_id: str | None = None
+    mode: Literal["conversing", "storytelling", "curating"] | None = None
 
 
 class TokenResponse(BaseModel):
     value: str | None = None
     client_secret: str | None = None
-    model: str = "gpt-realtime"
+    model: str = "gpt-realtime-2.1"
     expires_at: int | None = None
     stubbed: bool = False
+    mode: AgentMode = "conversing"
+
+
+class AgentPackOut(BaseModel):
+    mode: AgentMode
+    instructions: str
+    tools: list[dict]
 
 
 def _load_conversation(db: Session, owner_id: str, conversation_id: str) -> models.Conversation | None:
@@ -69,6 +76,127 @@ def _load_story(db: Session, owner_id: str, story_id: str) -> models.Story | Non
     )
 
 
+def _turn_lines(turns: list | None, *, limit: int = 40) -> list[str]:
+    if not isinstance(turns, list):
+        return []
+    lines: list[str] = []
+    for t in turns:
+        if isinstance(t, dict) and t.get("role") in ("user", "assistant") and t.get("content"):
+            who = "User" if t["role"] == "user" else "Assistant"
+            lines.append(f"{who}: {t['content']}")
+    return lines[-limit:]
+
+
+def _build_instructions(
+    body: TokenRequest,
+    current_user: models.User,
+    db: Session,
+    mode: AgentMode,
+) -> str:
+    name = (current_user.display_name or "").strip() or "there"
+    notes = preference_notes_for_prompt(db, str(current_user.id))
+    instructions = instructions_for_mode(mode, display_name=name, preference_notes=notes)
+
+    owner_id = str(current_user.id)
+    conv = (
+        _load_conversation(db, owner_id, body.conversation_id) if body.conversation_id else None
+    )
+    story = _load_story(db, owner_id, body.story_id) if body.story_id else None
+
+    # When only story_id is set, still load source conversation for transcript context
+    if story and not conv and story.source_conversation_id:
+        conv = _load_conversation(db, owner_id, str(story.source_conversation_id))
+
+    # When conversation is set without story_id, surface linked script if present
+    if conv and not story:
+        linked = (
+            db.query(models.Story)
+            .filter(
+                models.Story.source_conversation_id == conv.id,
+                models.Story.owner_user_id == owner_id,
+                models.Story.deleted_at.is_(None),
+            )
+            .order_by(models.Story.created_at.desc())
+            .first()
+        )
+        if linked:
+            story = linked
+
+    turn_lines = _turn_lines(conv.session_turns_json if conv else None)
+    script_text = ((story.story_text if story else None) or (story.summary if story else None) or "").strip()
+
+    if mode == "conversing":
+        instructions += (
+            "\n\nSTUDIO CONTEXT — Conversation:\n"
+            "- Before: entry into Conversation Studio (or Create → new memory).\n"
+            "- This: elicitation only; exact transcript is the artifact.\n"
+            "- Next: Script (derive / Storyteller). Curate and Share come later — never pressure share."
+        )
+        if turn_lines:
+            instructions += (
+                "\n\nRecent turns (continue this thread):\n" + "\n".join(turn_lines)
+            )
+            instructions += (
+                "\n\nRECALLED: briefly acknowledge you're picking up this thread and invite them "
+                "to go deeper. Offer Script only when they seem ready."
+            )
+        if script_text:
+            instructions += (
+                "\n\nNote: a Script already exists for this talk. They can refresh it later; "
+                "keep focusing on dialogue unless they ask to advance."
+            )
+
+    elif mode == "storytelling":
+        instructions += (
+            "\n\nSTUDIO CONTEXT — Script:\n"
+            "- Before: Conversation transcript (exact words).\n"
+            "- This: craft/refine the professional script while they can still see it on screen.\n"
+            "- Next: Curate (music, tone, voice, one photo). Share is optional access after Curate."
+        )
+        if turn_lines:
+            instructions += (
+                "\n\nTranscript excerpt (keep meaning; do not invent major facts):\n"
+                + "\n".join(turn_lines[-24:])
+            )
+        if script_text:
+            instructions += (
+                "\n\nCurrent script text on the canvas (revise from this):\n" + script_text[:4000]
+            )
+        else:
+            instructions += (
+                "\n\nNo script text saved yet — craft a clear first-person draft from the transcript."
+            )
+
+    else:  # curating
+        bgm = ((story.bgm_track if story else None) or "neutral").strip() or "neutral"
+        tone = ((story.narration_tone if story else None) or "warm").strip() or "warm"
+        has_photo = bool(story and story.photo_asset_id)
+        has_unique = bool(story and getattr(story, "bgm_asset_id", None))
+        voice = voice_enrollment_snapshot(db, str(current_user.id))
+        instructions += (
+            "\n\nSTUDIO CONTEXT — Curate:\n"
+            "- Before: Script wording is set (point back to Script Studio for rewrites).\n"
+            "- This: finishing touches — you own music + speaking tone; they adjust by talking with you. "
+            "Listen is the hero. Optional one photo; voice enrollment is Me → Voice.\n"
+            "- After: Who can listen is optional password access — you never create share links.\n"
+            f"- Current choices: bgm_track={bgm}, narration_tone={tone}, "
+            f"unique_bed={'yes' if has_unique else 'no'}, "
+            f"photo={'yes' if has_photo else 'no'}.\n"
+            f"- Voice: enrolled={'yes' if voice.get('enrolled') else 'no'}, "
+            f"clone_status={voice.get('clone_status')}, "
+            f"label={voice.get('label')}. "
+            f"Setup path: {voice.get('setup_path') or '/me/voice'}.\n"
+            "- If not enrolled: warmly suggest Me → Voice so Listen uses their voice.\n"
+            "- When they ask to change music or tone, call set_curate_choice, then invite Listen again."
+        )
+        if script_text:
+            instructions += (
+                "\n\nScript excerpt (do not rewrite wholesale):\n" + script_text[:2500]
+            )
+
+    return instructions
+
+
 @router.post("/token", response_model=TokenResponse)
 def mint_token(
     body: TokenRequest | None = None,
@@ -87,86 +215,38 @@ def mint_token(
         )
 
 
+@router.get("/agent-pack", response_model=AgentPackOut)
+def get_agent_pack(
+    mode: str = "conversing",
+    conversation_id: str | None = None,
+    story_id: str | None = None,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return instructions+tools for a mid-session Chief-of-Staff handoff (session.update)."""
+    resolved = normalize_mode(mode, story_id=story_id)
+    body = TokenRequest(conversation_id=conversation_id, story_id=story_id, mode=resolved)
+    instructions = _build_instructions(body, current_user, db, resolved)
+    return AgentPackOut(mode=resolved, instructions=instructions, tools=tools_for_mode(resolved))
+
+
 def _mint_token_impl(
     body: TokenRequest,
     current_user: models.User,
     db: Session,
 ) -> TokenResponse:
     api_key = (settings.openai_api_key or "").strip()
+    mode = normalize_mode(body.mode, story_id=body.story_id)
     if not api_key:
         return TokenResponse(
-            model=settings.openai_realtime_model or "gpt-realtime",
+            model=realtime_model(settings.openai_realtime_model),
             stubbed=True,
+            mode=mode,
         )
 
-    model = settings.openai_realtime_model or "gpt-realtime"
-    name = (current_user.display_name or "").strip() or "there"
-    instructions = (
-        REALTIME_INSTRUCTIONS
-        + f"\n\nThe person speaking is {name}. Greet them by name when they begin."
-    )
-
-    if body.conversation_id:
-        conv = _load_conversation(db, str(current_user.id), body.conversation_id)
-        if conv and isinstance(conv.session_turns_json, list):
-            lines = []
-            for t in conv.session_turns_json:
-                if isinstance(t, dict) and t.get("role") in ("user", "assistant") and t.get("content"):
-                    who = "User" if t["role"] == "user" else "Assistant"
-                    lines.append(f"{who}: {t['content']}")
-            if lines:
-                instructions += (
-                    "\n\nRecalled conversation (the user may want to continue this or turn it into a story):\n"
-                    + "\n".join(lines[-40:])
-                )
-                instructions += (
-                    "\n\nRECALLED: briefly acknowledge you're picking up this thread and invite them to go deeper "
-                    "or to turn it into a story."
-                )
-    elif body.story_id:
-        story = _load_story(db, str(current_user.id), body.story_id)
-        if story:
-            story_text = (story.story_text or story.summary or "").strip()
-            if story_text:
-                instructions += (
-                    "\n\nStory chosen for refinement (the person wants to review or adjust this):\n"
-                    + story_text[:4000]
-                    + "\n\nAsk if they want to review or change sections, keep it short and warm. "
-                    "When they are happy: speak a short sentence that you are saving, then call `confirm_story` "
-                    "with the final text; after the tool returns, SPEAK to confirm it is saved."
-                )
-
-    tools = [
-        {
-            "type": "function",
-            "name": "confirm_story",
-            "description": (
-                "Call when the user has approved the narrated story and said they are happy with it. "
-                "You MUST first speak a short sentence like 'I'm going to save your story now; please wait a moment.' "
-                "Only after saying that, call this tool with the exact final story text. After the tool returns, "
-                "SPEAK to confirm the story is saved and they can find it under Library."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "story_text": {
-                        "type": "string",
-                        "description": "The final narrative text of the story as agreed with the user.",
-                    },
-                },
-                "required": ["story_text"],
-            },
-        },
-        {
-            "type": "function",
-            "name": "forget_current_conversation",
-            "description": (
-                "Call when the user asks to forget this conversation or not save it. "
-                "After calling, confirm that this conversation will not be saved."
-            ),
-            "parameters": {"type": "object", "properties": {}},
-        },
-    ]
+    model = realtime_model(settings.openai_realtime_model)
+    instructions = _build_instructions(body, current_user, db, mode)
+    tools = tools_for_mode(mode)
 
     payload = {
         "expires_after": {"anchor": "created_at", "seconds": 600},
@@ -229,6 +309,7 @@ def _mint_token_impl(
         model=resp_model,
         expires_at=expires_at,
         stubbed=False,
+        mode=mode,
     )
 
 

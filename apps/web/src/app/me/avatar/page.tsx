@@ -49,7 +49,7 @@ export default function AvatarPage() {
   };
 
   const remove = async () => {
-    if (!confirm("Delete your avatar? Shared stories will no longer show your portrait.")) return;
+    if (!confirm("Delete your avatar? Story narrations will no longer show your portrait.")) return;
     try {
       const res = await fetch(`${API_BASE}/me/avatar`, { method: "DELETE" });
       if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
@@ -64,8 +64,7 @@ export default function AvatarPage() {
       <p style={{ marginBottom: 10 }}><Link href="/me">← Me</Link></p>
       <h1 className="page-title">Your pencil-sketch avatar</h1>
       <p className="page-lead">
-        Upload a clear selfie. We&rsquo;ll create a friendly pencil-sketch portrait that narrates
-        your shared stories.
+        Upload a clear selfie. We&rsquo;ll create a friendly pencil-sketch portrait for your story narrations.
       </p>
 
       <input

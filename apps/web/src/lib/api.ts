@@ -60,7 +60,7 @@ function splitInit(init?: ApiOptions): { init: RequestInit | undefined; silent: 
 export async function apiGet<T>(path: string, init?: ApiOptions): Promise<T> {
   const url = `${API_BASE}${path}`;
   const { init: fetchInit, silent } = splitInit(init);
-  const res = await fetch(url, { ...fetchInit, cache: "no-store" });
+  const res = await fetch(url, { credentials: "include", cache: "no-store", ...fetchInit });
   if (!res.ok) {
     const { msg, body } = await parseErrorResponse(res);
     if (!silent.includes(res.status)) {
@@ -76,6 +76,7 @@ export async function apiPost<T>(path: string, body: unknown, init?: ApiOptions)
   const { init: fetchInit, silent } = splitInit(init);
   const res = await fetch(url, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json", ...(fetchInit?.headers || {}) },
     body: JSON.stringify(body),
     ...fetchInit,
@@ -117,6 +118,7 @@ export async function apiPostWithTimeout<T>(path: string, body: unknown, timeout
   try {
     const res = await fetch(url, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
       body: JSON.stringify(body),
       ...init,
@@ -141,6 +143,7 @@ export async function apiPatch<T>(path: string, body: unknown, init?: ApiOptions
   const { init: fetchInit, silent } = splitInit(init);
   const res = await fetch(url, {
     method: "PATCH",
+    credentials: "include",
     headers: { "Content-Type": "application/json", ...(fetchInit?.headers || {}) },
     body: JSON.stringify(body),
     ...fetchInit,
@@ -158,7 +161,7 @@ export async function apiPatch<T>(path: string, body: unknown, init?: ApiOptions
 export async function apiDelete(path: string, init?: ApiOptions): Promise<void> {
   const url = `${API_BASE}${path}`;
   const { init: fetchInit, silent } = splitInit(init);
-  const res = await fetch(url, { method: "DELETE", ...fetchInit });
+  const res = await fetch(url, { method: "DELETE", credentials: "include", ...fetchInit });
   if (!res.ok) {
     const { msg, body } = await parseErrorResponse(res);
     if (!silent.includes(res.status)) {
@@ -166,6 +169,42 @@ export async function apiDelete(path: string, init?: ApiOptions): Promise<void> 
     }
     throw new Error(msg || `DELETE ${path} failed: ${res.status}`);
   }
+}
+
+/**
+ * Fetch a binary response (e.g. narration MP3) with session cookies.
+ * Prefer this over putting auth-gated URLs on <audio src>, which cannot
+ * surface JSON errors and may race with cache-busting query params.
+ */
+export async function apiGetBlob(path: string, init?: ApiOptions): Promise<Blob> {
+  const result = await apiGetBlobWithMeta(path, init);
+  return result.blob;
+}
+
+/** Like apiGetBlob, but also returns selected response headers (e.g. narration voice). */
+export async function apiGetBlobWithMeta(
+  path: string,
+  init?: ApiOptions
+): Promise<{ blob: Blob; headers: Headers }> {
+  const url = `${API_BASE}${path}`;
+  const { init: fetchInit, silent } = splitInit(init);
+  const res = await fetch(url, { credentials: "include", cache: "no-store", ...fetchInit });
+  if (!res.ok) {
+    const { msg, body } = await parseErrorResponse(res);
+    if (!silent.includes(res.status)) {
+      logApiError("GET", path, res.status, url, body, msg);
+    }
+    throw new Error(msg || `GET ${path} failed: ${res.status}`);
+  }
+  const blob = await res.blob();
+  if (!blob || blob.size < 32) {
+    throw new Error("Audio response was empty.");
+  }
+  const type = (blob.type || res.headers.get("content-type") || "").toLowerCase();
+  if (type.includes("json") || type.includes("text/html") || type.includes("text/plain")) {
+    throw new Error("Server returned an error instead of audio.");
+  }
+  return { blob, headers: res.headers };
 }
 
 /** POST multipart/form-data (e.g. file upload). Do not set Content-Type so browser sets boundary. */

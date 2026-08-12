@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { apiPost, apiDelete, apiGet } from "@/lib/api";
+import { apiPost, apiDelete, apiGet, apiPatch } from "@/lib/api";
 
 type ShareOut = {
   token: string;
   url: string;
   target_type: string;
   target_id: string;
-  has_code: boolean;
+  has_password: boolean;
   created_at: string;
   revoked_at: string | null;
 };
@@ -21,23 +21,32 @@ type Props = {
 };
 
 export default function ShareSheet({ targetType, targetId, open, onClose }: Props) {
-  const [code, setCode] = useState("");
-  const [useCode, setUseCode] = useState(false);
+  const [password, setPassword] = useState("");
+  const [changePasswordFor, setChangePasswordFor] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState("");
   const [existing, setExisting] = useState<ShareOut[] | null>(null);
   const [creating, setCreating] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
-      setCode("");
-      setUseCode(false);
+      setPassword("");
+      setChangePasswordFor(null);
+      setNewPassword("");
       setError(null);
       setCopied(null);
       return;
     }
     apiGet<ShareOut[]>("/shares")
-      .then((all) => setExisting(all.filter((s) => s.target_type === targetType && s.target_id === targetId && !s.revoked_at)))
+      .then((all) =>
+        setExisting(
+          all.filter(
+            (s) => s.target_type === targetType && s.target_id === targetId && !s.revoked_at
+          )
+        )
+      )
       .catch(() => setExisting([]));
   }, [open, targetType, targetId]);
 
@@ -45,24 +54,20 @@ export default function ShareSheet({ targetType, targetId, open, onClose }: Prop
 
   const onCreate = async () => {
     setError(null);
+    const pw = password.trim();
+    if (pw.length < 4) {
+      setError("Choose a password of at least 4 characters.");
+      return;
+    }
     setCreating(true);
     try {
-      const body: { target_type: string; target_id: string; code?: string } = {
+      const s = await apiPost<ShareOut>("/shares", {
         target_type: targetType,
         target_id: targetId,
-      };
-      if (useCode) {
-        if (!/^\d{4}$/.test(code)) {
-          setError("Code must be exactly 4 digits.");
-          setCreating(false);
-          return;
-        }
-        body.code = code;
-      }
-      const s = await apiPost<ShareOut>("/shares", body);
+        password: pw,
+      });
       setExisting((prev) => (prev ? [s, ...prev] : [s]));
-      setUseCode(false);
-      setCode("");
+      setPassword("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create share link.");
     } finally {
@@ -83,58 +88,79 @@ export default function ShareSheet({ targetType, targetId, open, onClose }: Prop
   };
 
   const revoke = async (token: string) => {
-    if (!confirm("Revoke this share link? Recipients will no longer be able to open it.")) return;
+    if (!confirm("Remove access for this link? Anyone with it will no longer be able to open it.")) return;
     try {
       await apiDelete(`/shares/${encodeURIComponent(token)}`);
       setExisting((prev) => (prev ?? []).filter((s) => s.token !== token));
+      if (changePasswordFor === token) {
+        setChangePasswordFor(null);
+        setNewPassword("");
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not revoke the link.");
+      setError(e instanceof Error ? e.message : "Could not remove the link.");
+    }
+  };
+
+  const saveNewPassword = async (token: string) => {
+    setError(null);
+    const pw = newPassword.trim();
+    if (pw.length < 4) {
+      setError("New password must be at least 4 characters.");
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      const updated = await apiPatch<ShareOut>(`/shares/${encodeURIComponent(token)}`, {
+        password: pw,
+      });
+      setExisting((prev) => (prev ?? []).map((s) => (s.token === token ? updated : s)));
+      setChangePasswordFor(null);
+      setNewPassword("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not change the password.");
+    } finally {
+      setSavingPassword(false);
     }
   };
 
   return (
     <div className="sheet-overlay" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ margin: "0 0 10px", fontSize: "1.1rem", fontWeight: 700 }}>Share</h2>
+        <h2 style={{ margin: "0 0 10px", fontSize: "1.1rem", fontWeight: 700 }}>
+          Who can listen
+        </h2>
         <p className="text-muted" style={{ margin: "0 0 14px", fontSize: 14 }}>
-          Create a link. Anyone with the link can listen. Add a 4-digit code for extra privacy.
+          This stays private to you until you create a password-protected link. Share the link and
+          password only when you choose — not a public post. You can change the password or remove
+          access anytime.
         </p>
 
         <div className="stack-12">
-          <label className="field" style={{ gap: 8 }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <input
-                type="checkbox"
-                checked={useCode}
-                onChange={(e) => setUseCode(e.target.checked)}
-              />
-              <span className="label-text">Require a 4-digit code</span>
-            </span>
-          </label>
-          {useCode ? (
+          <label className="field">
+            <span className="label-text">Password for new link</span>
             <input
               className="input"
               type="text"
-              inputMode="numeric"
-              pattern="\d{4}"
-              maxLength={4}
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 4))}
-              placeholder="e.g. 1234"
-              aria-label="4-digit code"
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Choose a password"
+              aria-label="Password for new share link"
             />
-          ) : null}
+          </label>
           {error ? <div className="msg msg-error">{error}</div> : null}
           <button className="btn btn-primary btn-block" disabled={creating} onClick={onCreate}>
-            {creating ? "Creating…" : "Create share link"}
+            {creating ? "Creating…" : "Create protected link"}
           </button>
         </div>
 
-        <div className="section-title" style={{ marginBottom: 8 }}>Your links</div>
+        <div className="section-title" style={{ marginBottom: 8 }}>Active links</div>
         {existing === null ? (
           <p className="text-muted" style={{ fontSize: 14 }}>Loading…</p>
         ) : existing.length === 0 ? (
-          <p className="text-muted" style={{ fontSize: 14 }}>No active links yet.</p>
+          <p className="text-muted" style={{ fontSize: 14 }}>
+            No links yet. Only you can listen until you invite someone.
+          </p>
         ) : (
           <ul className="stack-8" style={{ listStyle: "none", padding: 0, margin: 0 }}>
             {existing.map((s) => (
@@ -143,16 +169,59 @@ export default function ShareSheet({ targetType, targetId, open, onClose }: Prop
                   <code style={{ fontSize: 12, wordBreak: "break-all", flex: 1, minWidth: 0 }}>
                     /s/{s.token}
                   </code>
-                  {s.has_code ? <span className="row-chip">code</span> : null}
+                  <span className="row-chip">password</span>
                 </div>
-                <div className="btn-row" style={{ marginTop: 8 }}>
-                  <button className="btn btn-ghost" onClick={() => copy(s.token)}>
-                    {copied === s.token ? "Copied!" : "Copy"}
-                  </button>
-                  <button className="btn btn-danger" onClick={() => revoke(s.token)}>
-                    Revoke
-                  </button>
-                </div>
+                {changePasswordFor === s.token ? (
+                  <div className="stack-8" style={{ marginTop: 10 }}>
+                    <input
+                      className="input"
+                      type="text"
+                      autoComplete="new-password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="New password"
+                      aria-label="New password"
+                    />
+                    <div className="btn-row">
+                      <button
+                        className="btn btn-primary"
+                        disabled={savingPassword}
+                        onClick={() => void saveNewPassword(s.token)}
+                      >
+                        {savingPassword ? "Saving…" : "Save password"}
+                      </button>
+                      <button
+                        className="btn btn-ghost"
+                        type="button"
+                        onClick={() => {
+                          setChangePasswordFor(null);
+                          setNewPassword("");
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="btn-row" style={{ marginTop: 8 }}>
+                    <button className="btn btn-ghost" onClick={() => copy(s.token)}>
+                      {copied === s.token ? "Copied!" : "Copy link"}
+                    </button>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => {
+                        setChangePasswordFor(s.token);
+                        setNewPassword("");
+                        setError(null);
+                      }}
+                    >
+                      Change password
+                    </button>
+                    <button className="btn btn-danger" onClick={() => revoke(s.token)}>
+                      Remove access
+                    </button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>

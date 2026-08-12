@@ -2,6 +2,8 @@
 
 **Purpose:** Reference document for future builds and releases. Captures mistakes, root causes, and fixes we discovered during production debugging (especially the "Delete story" 404 issue). Use this to avoid repeating the same problems.
 
+**Azure cost (pilot):** ACA `aca-lifebook-api-v1` uses **minReplicas = 0** (scale-to-zero). Expect cold starts; do not set minReplicas back to 1 without cost awareness. See [AZURE_COST_PILOT.md](AZURE_COST_PILOT.md).
+
 ---
 
 ## Summary: What Went Wrong and How We Fixed It

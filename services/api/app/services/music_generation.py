@@ -6,8 +6,9 @@ import httpx
 logger = logging.getLogger(__name__)
 
 ELEVENLABS_MUSIC_URL = "https://api.elevenlabs.io/v1/music"
-DEFAULT_DURATION_SEC = 60  # frontend loops if narration is longer
-HTTP_TIMEOUT = 120.0  # music generation can take 30-90s
+# Short looping bed: ~15s ≈ 1/4 the Music credits of a 60s clip; client loops under narration.
+DEFAULT_DURATION_SEC = 15
+HTTP_TIMEOUT = 90.0  # short beds usually finish well under a minute
 
 
 def generate_bgm_audio(prompt: str, duration: int = DEFAULT_DURATION_SEC, api_key: str = "") -> bytes | None:
@@ -22,8 +23,8 @@ def generate_bgm_audio(prompt: str, duration: int = DEFAULT_DURATION_SEC, api_ke
         logger.warning("music_generation: ELEVENLABS_API_KEY not set")
         return None
 
-    # music_length_ms: 3000–600000 (3s–10min); use duration in ms
-    length_ms = min(max(5000, duration * 1000), 120000)  # 5s–120s for BGM
+    # music_length_ms: 3000–600000 (3s–10min); clamp to a short pilot-friendly loop
+    length_ms = min(max(10000, int(duration) * 1000), 30000)  # 10s–30s
     payload = {
         "prompt": prompt[:4100],
         "music_length_ms": length_ms,
