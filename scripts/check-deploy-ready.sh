@@ -31,11 +31,11 @@ else
   ok=1
 fi
 
-# 2. Workflow: verify step must exist (delete route + BGM)
+# 2. Workflow: verify step must exist (Curate BGM + voice clone)
 if grep -q 'Verify API source' .github/workflows/deploy-api.yml 2>/dev/null; then
   echo -e "${GREEN}✓${NC} deploy-api.yml: Verify API source step present"
 else
-  echo -e "${RED}✗${NC} deploy-api.yml: Missing verify step for delete route / BGM"
+  echo -e "${RED}✗${NC} deploy-api.yml: Missing verify step for Curate BGM / voice clone"
   ok=1
 fi
 
@@ -47,11 +47,13 @@ else
   ok=1
 fi
 
-# 4. API: delete route in voice.py
-if grep -q '"/stories/shared/delete"' services/api/app/routers/voice.py 2>/dev/null; then
-  echo -e "${GREEN}✓${NC} voice.py: Delete route present"
+# 4. API: Curate BGM + voice clone + library delete (legacy voice.py removed)
+if grep -q 'curate/suggest' services/api/app/routers/library.py 2>/dev/null \
+  && grep -q 'ensure_story_generated_bgm' services/api/app/services/story_curation.py 2>/dev/null \
+  && grep -q 'voices/add' services/api/app/routers/me_voice.py 2>/dev/null; then
+  echo -e "${GREEN}✓${NC} API: Curate BGM + voice clone present"
 else
-  echo -e "${RED}✗${NC} voice.py: Delete route not found"
+  echo -e "${RED}✗${NC} API: Curate BGM / voice clone markers not found"
   ok=1
 fi
 

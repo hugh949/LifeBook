@@ -10,7 +10,7 @@ To maximize confidence that production matches local:
 
 1. **Commit** — Nothing is deployable until committed. `release.sh` runs `check-deploy-ready.sh --require-clean` and **fails** if there are uncommitted changes.
 2. **Push** — After `git push`, the release script **verifies** that `origin/main` equals your local `HEAD`. If not, the script exits so you don’t trigger a deploy from the wrong commit.
-3. **Build** — The deploy workflow checks out **the commit that triggered the run** (`ref: ${{ github.sha }}`), builds the Docker image with **`--no-cache`** and **`BUILD_SHA=${{ github.sha }}`** baked into the image, and has a **source verification** step that greps for critical routes (delete, narrate/bgm, ElevenLabs) so the build fails if that code is missing.
+3. **Build** — The deploy workflow checks out **the commit that triggered the run** (`ref: ${{ github.sha }}`), builds the Docker image with **`--no-cache`** and **`BUILD_SHA=${{ github.sha }}`** baked into the image, and has a **source verification** step that greps for critical routes (library delete, Curate BGM / `ensure_story_generated_bgm`, ElevenLabs voice clone) so the build fails if that code is missing.
 4. **Deploy** — After updating the Container App, the workflow **routes 100% traffic to the latest revision** and then **verifies** that production `/health` returns `build_sha` equal to `github.sha`. If the running API reports a different commit, the workflow **fails**.
 
 So: same commit → same build → same image → verified at runtime. If any step fails, fix it before considering the release done.

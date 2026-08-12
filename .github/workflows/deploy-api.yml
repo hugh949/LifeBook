@@ -149,23 +149,31 @@ jobs:
           fi
           echo "==> API infrastructure check complete."
 
-      - name: Verify API source (delete route + BGM)
+      - name: Verify API source (Curate BGM + voice clone + library delete)
         run: |
           echo "==> Building from commit ${{ github.sha }}"
-          if ! grep -q '"/stories/shared/delete"' services/api/app/routers/voice.py; then
-            echo "==> ERROR: services/api/app/routers/voice.py does not contain the delete route. Check commit and workflow ref."
+          if ! grep -q '@router.delete("/library/stories/{story_id}")' services/api/app/routers/library.py; then
+            echo "==> ERROR: library.py missing story delete route. Check commit and workflow ref."
             exit 1
           fi
-          echo "==> Delete route present in source."
-          if ! grep -q 'narrate/bgm' services/api/app/routers/voice.py; then
-            echo "==> ERROR: voice.py does not contain narrate/bgm route. Check commit and workflow ref."
+          echo "==> Library story delete present in source."
+          if ! grep -q 'curate/suggest' services/api/app/routers/library.py; then
+            echo "==> ERROR: library.py does not contain curate/suggest. Check commit and workflow ref."
+            exit 1
+          fi
+          if ! grep -q 'ensure_story_generated_bgm' services/api/app/services/story_curation.py; then
+            echo "==> ERROR: story_curation.py missing ensure_story_generated_bgm. Check commit and workflow ref."
             exit 1
           fi
           if ! grep -q 'elevenlabs' services/api/app/services/music_generation.py; then
             echo "==> ERROR: music_generation.py does not contain ElevenLabs BGM code. Check commit and workflow ref."
             exit 1
           fi
-          echo "==> BGM (narrate/bgm + ElevenLabs) present in source."
+          if ! grep -q 'voices/add' services/api/app/routers/me_voice.py; then
+            echo "==> ERROR: me_voice.py missing ElevenLabs voices/add clone path. Check commit and workflow ref."
+            exit 1
+          fi
+          echo "==> Curate BGM + voice clone present in source."
 
       - name: Login to ACR
         run: |
