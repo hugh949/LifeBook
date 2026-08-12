@@ -6,7 +6,7 @@ hash and soft revoke.
 """
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Text, Float, ForeignKey, DateTime, LargeBinary
+from sqlalchemy import Boolean, Column, String, Text, Float, ForeignKey, DateTime, LargeBinary
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase
 
@@ -32,6 +32,10 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     display_name = Column(String(255), nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    # Optional TOTP 2FA (authenticator apps). Secret is base32; only set while pending or enabled.
+    totp_secret = Column(String(64), nullable=True)
+    totp_enabled = Column(Boolean, nullable=False, default=False)
+    totp_enabled_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class UserVoice(Base):
@@ -183,6 +187,17 @@ class PasswordResetToken(Base):
     user_id = Column(ID_TYPE, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     token_hash = Column(String(128), nullable=False, unique=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class UserRecoveryCode(Base):
+    """One-time recovery codes for TOTP 2FA (hashed at rest)."""
+
+    __tablename__ = "user_recovery_codes"
+    id = Column(ID_TYPE, primary_key=True, default=uuid7_str)
+    user_id = Column(ID_TYPE, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    code_hash = Column(String(128), nullable=False, unique=True)
     used_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 

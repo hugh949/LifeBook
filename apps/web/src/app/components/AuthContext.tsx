@@ -8,7 +8,8 @@ export type Me = {
   id: string;
   email: string;
   display_name: string;
-  created_at: string;
+  created_at?: string;
+  totp_enabled?: boolean;
 };
 
 type AuthState = {

@@ -1,6 +1,8 @@
 """Session security: bcrypt password hashing + HS256 JWT cookie tokens.
 
 Password reset uses hashed one-time tokens (see ``/auth/forgot-password``).
+Short-lived 2FA challenge JWTs use ``purpose=2fa_challenge`` and are never
+accepted as session cookies.
 """
 from __future__ import annotations
 
@@ -25,6 +27,9 @@ from app.db.session import get_db
 
 
 logger = logging.getLogger(__name__)
+
+# Short-lived token after password OK when TOTP is enabled (seconds).
+TWO_FA_CHALLENGE_TTL_SECONDS = 300
 
 
 # -- Password hashing --------------------------------------------------------
@@ -58,12 +63,8 @@ def _sign(msg: bytes, secret: str) -> str:
     return _b64url_encode(sig)
 
 
-def make_session_token(user_id: str, ttl_days: Optional[int] = None) -> str:
-    """Issue an HS256 JWT with `sub=user_id`, `iat`, `exp`."""
-    now = int(time.time())
-    ttl = (ttl_days if ttl_days is not None else settings.session_ttl_days) * 86400
+def _encode_jwt(payload: dict) -> str:
     header = {"alg": "HS256", "typ": "JWT"}
-    payload = {"sub": user_id, "iat": now, "exp": now + ttl}
     h = _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
     p = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     signing = f"{h}.{p}".encode("ascii")
@@ -71,7 +72,7 @@ def make_session_token(user_id: str, ttl_days: Optional[int] = None) -> str:
     return f"{h}.{p}.{sig}"
 
 
-def decode_session_token(token: str) -> Optional[dict]:
+def _decode_jwt(token: str) -> Optional[dict]:
     try:
         h_b64, p_b64, sig = token.split(".")
     except ValueError:
@@ -89,6 +90,47 @@ def decode_session_token(token: str) -> Optional[dict]:
     if int(payload.get("exp") or 0) < int(time.time()):
         return None
     return payload
+
+
+def make_session_token(user_id: str, ttl_days: Optional[int] = None) -> str:
+    """Issue an HS256 JWT with `sub=user_id`, `iat`, `exp`."""
+    now = int(time.time())
+    ttl = (ttl_days if ttl_days is not None else settings.session_ttl_days) * 86400
+    return _encode_jwt({"sub": user_id, "iat": now, "exp": now + ttl})
+
+
+def decode_session_token(token: str) -> Optional[dict]:
+    payload = _decode_jwt(token)
+    if not payload:
+        return None
+    # Challenge tokens must never be treated as sessions.
+    if payload.get("purpose"):
+        return None
+    return payload
+
+
+def make_2fa_challenge_token(user_id: str, ttl_seconds: int = TWO_FA_CHALLENGE_TTL_SECONDS) -> str:
+    """Short-lived token proving password succeeded; not a session."""
+    now = int(time.time())
+    return _encode_jwt(
+        {
+            "sub": user_id,
+            "iat": now,
+            "exp": now + ttl_seconds,
+            "purpose": "2fa_challenge",
+        }
+    )
+
+
+def decode_2fa_challenge_token(token: str) -> Optional[str]:
+    """Return user_id if token is a valid 2FA challenge, else None."""
+    payload = _decode_jwt(token)
+    if not payload:
+        return None
+    if payload.get("purpose") != "2fa_challenge":
+        return None
+    user_id = payload.get("sub")
+    return str(user_id) if user_id else None
 
 
 # -- Cookie helpers ----------------------------------------------------------

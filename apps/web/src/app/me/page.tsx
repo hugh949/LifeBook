@@ -204,6 +204,29 @@ export default function MePage() {
       </div>
 
       <Link
+        href="/me/security"
+        className="row-item"
+        style={{ marginBottom: 10 }}
+        aria-label="Security settings"
+      >
+        <div className="row-main">
+          <div className="row-title">Security</div>
+          <div className="row-sub">
+            Optional two-factor authentication with an authenticator app.
+          </div>
+        </div>
+        <span
+          className="row-chip"
+          style={{
+            background: me?.totp_enabled ? "var(--success-bg)" : "var(--accent-soft)",
+            color: me?.totp_enabled ? "var(--success)" : "var(--ink-muted)",
+          }}
+        >
+          {me?.totp_enabled ? "2FA on" : "2FA off"}
+        </span>
+      </Link>
+
+      <Link
         href="/me/voice"
         className="row-item"
         style={{ marginBottom: 10 }}
