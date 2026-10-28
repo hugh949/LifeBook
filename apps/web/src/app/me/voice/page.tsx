@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { apiGet, apiPostFormData, API_BASE } from "@/lib/api";
+import { apiGet, apiPostBlob, apiPostFormData, API_BASE } from "@/lib/api";
 import { createWavRecorderRolling, type WavRecorderRolling } from "@/lib/wavRecorder";
 
 type VoiceStatus = {
@@ -16,12 +16,57 @@ type VoiceStatus = {
 const TARGET_SECONDS = 75; // encourage a little over the minimum 60s
 const MIN_SECONDS = 60;
 
+/** 20ms of 8 kHz silence. Played in the tap so this element stays unlocked on iOS. */
+const SILENT_WAV =
+  "data:audio/wav;base64,UklGRmQBAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YUABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+
+function audioContextCtor(): typeof AudioContext | null {
+  if (typeof window === "undefined") return null;
+  return (
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext ||
+    null
+  );
+}
+
+function mountSampleAudio(audio: HTMLAudioElement) {
+  audio.preload = "auto";
+  audio.setAttribute("playsinline", "true");
+  if (!audio.isConnected) {
+    audio.style.display = "none";
+    document.body.appendChild(audio);
+  }
+}
+
+/** Play an MP3 blob through an AudioContext that was resumed during the tap. */
+async function startMp3InContext(
+  ctx: AudioContext,
+  blob: Blob,
+  stopRef: { current: (() => void) | null }
+): Promise<void> {
+  if (ctx.state === "suspended") await ctx.resume();
+  const bytes = await blob.arrayBuffer();
+  const audioBuffer = await ctx.decodeAudioData(bytes.slice(0));
+  const source = ctx.createBufferSource();
+  source.buffer = audioBuffer;
+  source.connect(ctx.destination);
+  stopRef.current = () => {
+    try {
+      source.stop();
+    } catch {
+      /* already stopped */
+    }
+  };
+  source.start(0);
+}
+
 export default function VoicePage() {
   const [status, setStatus] = useState<VoiceStatus | null>(null);
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [level, setLevel] = useState(0);
   const [processing, setProcessing] = useState(false);
+  const [sampleBusy, setSampleBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
@@ -31,6 +76,11 @@ export default function VoicePage() {
   const rafRef = useRef<number | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startedAtRef = useRef<number>(0);
+  const sampleAudioRef = useRef<HTMLAudioElement | null>(null);
+  const sampleCtxRef = useRef<AudioContext | null>(null);
+  const sampleUrlRef = useRef<string | null>(null);
+  const sampleStopRef = useRef<(() => void) | null>(null);
+  const sampleGenRef = useRef(0);
 
   const refreshStatus = useCallback(() => {
     apiGet<VoiceStatus>("/me/voice")
@@ -67,6 +117,16 @@ export default function VoicePage() {
   }, [stopMeter]);
 
   useEffect(() => () => teardown(), [teardown]);
+
+  useEffect(() => () => {
+    sampleGenRef.current += 1;
+    sampleAudioRef.current?.pause();
+    sampleAudioRef.current?.remove();
+    sampleStopRef.current?.();
+    if (sampleUrlRef.current) URL.revokeObjectURL(sampleUrlRef.current);
+    const ctx = sampleCtxRef.current;
+    if (ctx) void ctx.close().catch(() => undefined);
+  }, []);
 
   const startRecording = async () => {
     setError(null);
@@ -151,11 +211,82 @@ export default function VoicePage() {
   };
 
   const playSample = () => {
-    const audio = new Audio(`${API_BASE}/me/voice/sample`);
-    audio.crossOrigin = "anonymous";
-    audio.play().catch(() => {
-      setError("Could not play sample. Try again.");
-    });
+    if (sampleBusy) return;
+    setError(null);
+    setSampleBusy(true);
+    const gen = ++sampleGenRef.current;
+
+    // Sample is POST /me/voice/sample. <audio src> always GETs that URL (production
+    // returned 405), so fetch the MP3 with the session cookie and play a blob URL.
+    const audio = sampleAudioRef.current ?? new Audio();
+    sampleAudioRef.current = audio;
+    mountSampleAudio(audio);
+
+    const Ctor = audioContextCtor();
+    let ctx = sampleCtxRef.current;
+    if (Ctor && (!ctx || ctx.state === "closed")) {
+      ctx = new Ctor();
+      sampleCtxRef.current = ctx;
+    }
+    // Resume inside the tap. iOS keeps this context running after the TTS await.
+    const resumePromise = ctx?.resume() ?? Promise.resolve();
+
+    sampleStopRef.current?.();
+    sampleStopRef.current = null;
+    audio.pause();
+    audio.muted = true;
+    audio.src = SILENT_WAV;
+    const unlock = audio.play();
+
+    void (async () => {
+      try {
+        await Promise.all([
+          unlock.catch(() => undefined),
+          resumePromise.catch(() => undefined),
+        ]);
+        if (gen !== sampleGenRef.current) return;
+
+        const blob = await apiPostBlob("/me/voice/sample", {
+          headers: { Accept: "audio/mpeg" },
+        });
+        if (gen !== sampleGenRef.current) return;
+
+        const typed = blob.type.toLowerCase().includes("audio")
+          ? blob
+          : new Blob([await blob.arrayBuffer()], { type: "audio/mpeg" });
+
+        if (sampleUrlRef.current) URL.revokeObjectURL(sampleUrlRef.current);
+        const url = URL.createObjectURL(typed);
+        sampleUrlRef.current = url;
+
+        audio.muted = false;
+        audio.pause();
+        audio.src = url;
+        audio.load();
+        try {
+          await audio.play();
+        } catch (playErr) {
+          const name = playErr instanceof DOMException ? playErr.name : "";
+          const canFallback = name === "NotAllowedError" || name === "NotSupportedError" || name === "AbortError";
+          if (!canFallback) throw playErr;
+          audio.pause();
+          if (!ctx) throw new Error("Could not play sample. Try again.");
+          await startMp3InContext(ctx, typed, sampleStopRef);
+        }
+      } catch (e) {
+        if (gen !== sampleGenRef.current) return;
+        audio.pause();
+        setError(
+          e instanceof DOMException
+            ? "Could not play sample. Try again."
+            : e instanceof Error && e.message
+              ? e.message
+              : "Could not play sample. Try again."
+        );
+      } finally {
+        if (gen === sampleGenRef.current) setSampleBusy(false);
+      }
+    })();
   };
 
   const pct = Math.min(100, Math.round((elapsed / TARGET_SECONDS) * 100));
@@ -226,7 +357,9 @@ export default function VoicePage() {
             Your stories can be narrated in your voice when you listen privately or share.
           </p>
           <div className="btn-row">
-            <button className="btn btn-primary" onClick={playSample}>Play sample</button>
+            <button className="btn btn-primary" onClick={playSample} disabled={sampleBusy}>
+              {sampleBusy ? "Preparing sample…" : "Play sample"}
+            </button>
             <button className="btn btn-ghost" onClick={startRecording}>Re-record</button>
             <button className="btn btn-danger" onClick={remove}>Delete clone</button>
           </div>

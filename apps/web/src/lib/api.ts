@@ -181,6 +181,12 @@ export async function apiGetBlob(path: string, init?: ApiOptions): Promise<Blob>
   return result.blob;
 }
 
+/** POST that returns audio (e.g. voice-clone sample). Sends the session cookie. */
+export async function apiPostBlob(path: string, init?: ApiOptions): Promise<Blob> {
+  const result = await apiGetBlobWithMeta(path, { ...init, method: "POST" });
+  return result.blob;
+}
+
 /** Like apiGetBlob, but also returns selected response headers (e.g. narration voice). */
 export async function apiGetBlobWithMeta(
   path: string,
@@ -188,13 +194,14 @@ export async function apiGetBlobWithMeta(
 ): Promise<{ blob: Blob; headers: Headers }> {
   const url = `${API_BASE}${path}`;
   const { init: fetchInit, silent } = splitInit(init);
+  const method = (fetchInit?.method || "GET").toUpperCase();
   const res = await fetch(url, { credentials: "include", cache: "no-store", ...fetchInit });
   if (!res.ok) {
     const { msg, body } = await parseErrorResponse(res);
     if (!silent.includes(res.status)) {
-      logApiError("GET", path, res.status, url, body, msg);
+      logApiError(method, path, res.status, url, body, msg);
     }
-    throw new Error(msg || `GET ${path} failed: ${res.status}`);
+    throw new Error(msg || `${method} ${path} failed: ${res.status}`);
   }
   const blob = await res.blob();
   if (!blob || blob.size < 32) {
