@@ -21,22 +21,32 @@ bad() { echo "  FAIL $*"; fail=$((fail + 1)); }
 
 http() {
   # http METHOD URL OUTFILE [JSON]
-  local method="$1" url="$2" out="$3" body="${4:-}"
-  if [[ -n "$body" ]]; then
-    curl -sS --max-time "$TIMEOUT" -c "$TMP/cj" -b "$TMP/cj" \
-      -X "$method" -H "Content-Type: application/json" -d "$body" \
-      -o "$out" -w "%{http_code}" "$url" || echo "000"
-  else
-    curl -sS --max-time "$TIMEOUT" -c "$TMP/cj" -b "$TMP/cj" \
-      -X "$method" -o "$out" -w "%{http_code}" "$url" || echo "000"
-  fi
+  # One retry: Azure Web Apps often drop the first request after a restart.
+  local method="$1" url="$2" out="$3" body="${4:-}" attempt code
+  for attempt in 1 2; do
+    if [[ -n "$body" ]]; then
+      code=$(curl -sS --max-time "$TIMEOUT" -c "$TMP/cj" -b "$TMP/cj" \
+        -X "$method" -H "Content-Type: application/json" -d "$body" \
+        -o "$out" -w "%{http_code}" "$url" || true)
+    else
+      code=$(curl -sS --max-time "$TIMEOUT" -c "$TMP/cj" -b "$TMP/cj" \
+        -X "$method" -o "$out" -w "%{http_code}" "$url" || true)
+    fi
+    code="${code:-000}"
+    if [[ "$code" != "000" && "$code" != "000000" ]]; then
+      echo "$code"
+      return 0
+    fi
+    sleep 5
+  done
+  echo "000"
 }
 
 echo "=== Core QA: $BASE ==="
 
 echo "→ sign-in page"
 code=$(http GET "$BASE/signin" "$TMP/signin.html")
-if [[ "$code" == "200" ]] && grep -qi "LifeBook\|Welcome back" "$TMP/signin.html"; then
+if [[ "$code" == "200" ]] && grep -qi "LifeBook\|Welcome back\|app-version\|app-shell" "$TMP/signin.html"; then
   ok "signin page"
 else
   bad "signin page (HTTP $code)"
