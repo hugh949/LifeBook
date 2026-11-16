@@ -150,10 +150,8 @@ export default function ShareSheet({
           Who can listen
         </h2>
         <p className="text-muted" style={{ margin: "0 0 14px", fontSize: 14 }}>
-          This stays private to you until you create a password-protected link. Share the link and
-          password only when you choose — not a public post. You can change the password or remove
-          access anytime. To revise the words, open Script, edit, and Save, then create a new link
-          here. Remove an old link if that access should stop. Existing links play the current script.
+          Your story stays private until you make a link. Give that link and the password only to
+          family. You can remove a link at any time.
         </p>
 
         <div className="stack-12">
@@ -171,7 +169,7 @@ export default function ShareSheet({
           </label>
           {error ? <div className="msg msg-error">{error}</div> : null}
           <button className="btn btn-primary btn-block" disabled={creating} onClick={onCreate}>
-            {creating ? "Creating…" : "Create protected link"}
+            {creating ? "Creating…" : "Make a family link"}
           </button>
         </div>
 

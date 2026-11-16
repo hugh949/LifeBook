@@ -6,8 +6,8 @@ import { usePathname } from "next/navigation";
 type Tab = { href: string; label: string; match: (path: string) => boolean };
 
 const TABS: Tab[] = [
-  { href: "/talk", label: "Create", match: (p) => p === "/talk" || p.startsWith("/talk/") },
-  { href: "/library", label: "Library", match: (p) => p === "/library" || p.startsWith("/library/") },
+  { href: "/talk", label: "Record", match: (p) => p === "/talk" || p.startsWith("/talk/") },
+  { href: "/library", label: "Memories", match: (p) => p === "/library" || p.startsWith("/library/") },
   { href: "/me", label: "Me", match: (p) => p === "/me" || p.startsWith("/me/") },
 ];
 

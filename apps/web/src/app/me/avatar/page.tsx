@@ -75,7 +75,9 @@ export default function AvatarPage() {
         style={{ display: "none" }}
       />
 
-      {error ? <div className="msg msg-error" role="alert" style={{ marginBottom: 12 }}>{error}</div> : null}
+      {error && error !== status?.error ? (
+        <div className="msg msg-error" role="alert" style={{ marginBottom: 12 }}>{error}</div>
+      ) : null}
 
       {uploading || status?.status === "pencilizing" ? (
         <div className="card center stack-12">

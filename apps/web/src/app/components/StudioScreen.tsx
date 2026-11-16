@@ -856,7 +856,7 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
       if (!voiceNote) {
         setStatusNote(
           stage === "script"
-            ? "Ready — voice only. Add finishing touches when it sounds like you."
+            ? "Ready. This is your voice only. Share it with your family when it sounds like you."
             : `Ready — ${readyMood}.`
         );
       }
@@ -993,14 +993,14 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
         setStatusNote("Talk saved. Writing your script…");
         void deriveRef.current();
       } else {
-        setStatusNote("Talk saved. Tap Write the script when you want to continue.");
+        setStatusNote("Talk saved. Tap Make my story when you are ready.");
       }
     },
     onReadyForScript: () => {},
     onStorySaved: (savedId) => {
       if (savedId) setStoryId((prev) => prev || savedId);
       load();
-      setStatusNote("The script was updated. Add finishing touches when it sounds like you.");
+      setStatusNote("Story updated. Share it with your family when it sounds like you.");
     },
     onCurateChoice: (choice) => {
       if (choice.bgm_track) setBgmTrack(normalizeBgmTrack(choice.bgm_track));
@@ -1080,7 +1080,7 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not derive a script.");
-      setStatusNote("The script didn’t finish. Tap Write the script to try again.");
+      setStatusNote("The story didn’t finish. Tap Make my story to try again.");
     } finally {
       setDeriving(false);
     }
@@ -1124,7 +1124,7 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
           {error}
         </div>
         <p style={{ marginTop: 16 }}>
-          <Link href="/library">← Back to Library</Link>
+          <Link href="/library">← Memories</Link>
         </p>
       </>
     );
@@ -1138,7 +1138,7 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
           {error}
         </div>
         <p style={{ marginTop: 16 }}>
-          <Link href="/library">← Back to Library</Link>
+          <Link href="/library">← Memories</Link>
         </p>
       </>
     );
@@ -1190,29 +1190,27 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
       mark: markFor("conversation"),
       reachable: Boolean(conversationId),
     },
-    { id: "script", label: "Script", mark: markFor("script"), reachable: Boolean(storyId) },
-    { id: "curate", label: "Finish", mark: markFor("curate"), reachable: Boolean(storyId) },
+    { id: "script", label: "Story", mark: markFor("script"), reachable: Boolean(storyId) },
+    { id: "curate", label: "Share", mark: markFor("curate"), reachable: Boolean(storyId) },
   ];
 
   const guide =
     statusNote ||
     (currentStep === "conversation"
       ? session.status === "saving" || deriving
-        ? "Writing your script from this talk. Stay here."
+        ? "Writing your story. Stay on this screen."
         : session.isListening || session.status === "connecting"
-          ? "Microphone is on. Speak naturally, then tap to finish. The script starts on its own."
+          ? "The microphone is on. Speak, then tap the button when you are finished."
           : storyId
-            ? "This talk already has a script. Open it whenever you want to keep going."
+            ? "This talk already has a story. Open Story when you want to hear it."
             : conversationWords
-              ? "This talk is saved. Tap Write the script and it opens here."
-              : "Microphone is off. Tap to talk, then speak. Nothing is recorded until you do."
+              ? "This talk is saved. Tap Make my story when you are ready."
+              : "The microphone is off. Tap the button, then speak."
       : currentStep === "script"
         ? scriptDirty
-          ? "These edits aren’t saved yet. Continue will save them, then open the finishing touches."
-          : "Play the script if you want to hear it. When it sounds like you, add finishing touches."
-        : !voiceEnrolled
-          ? "I suggest the music and how it should sound. A default voice works until you record your own. A photo is optional. When it feels right, share it below."
-          : "I suggest the music and how it should sound. Talk if you want them changed. A photo is optional. When it feels right, share it below.");
+          ? "Your edits are not saved yet. Share with family will save them."
+          : "Listen if you want. When it sounds like you, share it with your family."
+        : "Music is suggested for you. A photo is optional. When it feels right, share it below.");
 
   const pageTitle =
     currentStep === "conversation"
@@ -1231,15 +1229,9 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
     ? "End talk first"
     : previewLoading
       ? "Preparing…"
-        : isActuallyPlaying
-          ? "Pause"
-          : audioReady && audioSrc && !scriptDirty
-            ? stage === "script"
-              ? "Play the script"
-              : "Play"
-            : stage === "curate"
-              ? "Listen"
-              : "Play the script";
+      : isActuallyPlaying
+        ? "Pause"
+        : "Listen";
 
   const onScrub = (value: number) => {
     const n = narrationRef.current;
@@ -1409,7 +1401,7 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
       setStatusNote("Saving your script…");
       const ok = await saveScript({ quiet: true });
       if (!ok) {
-        setStatusNote("Save didn’t finish. Try Add finishing touches again.");
+        setStatusNote("Save didn’t finish. Tap Share with family again.");
         return;
       }
     }
@@ -1422,7 +1414,7 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
         <>
           {storyId ? (
             <button type="button" className="btn btn-primary btn-block" onClick={() => void goStage("script")}>
-              Open script
+              See my story
             </button>
           ) : spoken && !session.isListening && session.status !== "connecting" && session.status !== "saving" ? (
             <button
@@ -1431,7 +1423,7 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
               onClick={() => void readyForScript()}
               disabled={deriving}
             >
-              {deriving ? "Writing the script…" : "Write the script"}
+              {deriving ? "Writing your story…" : "Make my story"}
             </button>
           ) : null}
           {confirmDeleteConversation ? (
@@ -1476,12 +1468,12 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
             disabled={!draftText.trim() || session.isListening || savingScript || deriving}
             onClick={() => void continueToCurate()}
           >
-            {savingScript ? "Saving…" : "Add finishing touches"}
+            {savingScript ? "Saving…" : "Share with family"}
           </button>
         </>
       ) : null}
       {stage === "script" && !data ? (
-        <p className="stage-actions-note">{storyError || "Loading your Script…"}</p>
+        <p className="stage-actions-note">{storyError || "Loading your story…"}</p>
       ) : null}
       {stage === "curate" && data ? (
         <>
@@ -1490,7 +1482,7 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
       ) : null}
       {(stage === "curate" || stage === "share") && data ? (
         <button type="button" className="btn btn-ghost btn-block" onClick={() => void goStage("script")}>
-          Revise the script
+          Change the story
         </button>
       ) : null}
     </>
@@ -1499,7 +1491,7 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
   return (
     <>
       <p style={{ marginBottom: 4 }}>
-        <Link href="/library">← Library</Link>
+        <Link href="/library">← Memories</Link>
       </p>
 
       <StageShell
@@ -1517,12 +1509,12 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
               currentStep === "conversation"
                 ? "Tap to talk, then speak. Tap to finish and the script starts."
                 : currentStep === "script"
-                  ? "Optional. Talk only if you want the wording changed."
-                  : "Optional. Talk only if you want the music or tone changed."
+                  ? "Only if you want to change the words."
+                  : "Only if you want to change the music."
             }
             emphasis={currentStep === "conversation" ? "primary" : "optional"}
             idleLabel={
-              currentStep === "script" ? "Talk to change the wording" : "Talk to change the music"
+              currentStep === "script" ? "Talk to change the words" : "Talk to change the music"
             }
             status={session.status}
             message={session.message}
@@ -1575,7 +1567,7 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
                 onChange={(e) => {
                   setDraftTitle(e.target.value);
                   setScriptSaved(false);
-                  setStatusNote("These edits aren’t saved yet. Add finishing touches will save them.");
+                  setStatusNote("These edits are not saved yet. Share with family will save them.");
                 }}
                 placeholder="Script title"
               />
@@ -1590,7 +1582,7 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
                 onChange={(e) => {
                   setDraftText(e.target.value);
                   setScriptSaved(false);
-                  setStatusNote("These edits aren’t saved yet. Add finishing touches will save them.");
+                  setStatusNote("These edits are not saved yet. Share with family will save them.");
                 }}
                 placeholder="Your story script…"
               />
@@ -1706,27 +1698,27 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
               <div className="curate-status-card">
                 <p className="curate-status-line">
                   {autoCurating
-                    ? "Curator is choosing music and tone…"
+                    ? "Choosing music for this story…"
                     : curateStatusLine ||
-                      `Curator set: ${
+                      `Music: ${
                         normalizeBgmTrack(bgmTrack) === "none" ? "voice only" : bgmLabel(bgmTrack)
-                      } · ${toneLabel(narrationTone)} — tap Listen to hear`}
+                      }. Voice: ${toneLabel(narrationTone)}. Tap Listen to hear it.`}
                 </p>
                 {curateReason ? <p className="curate-status-why">{curateReason}</p> : null}
                 {musicSource === "generating" ? (
-                  <p className="curate-status-meta">Composing a unique bed for this story…</p>
+                  <p className="curate-status-meta">Making music for this story…</p>
                 ) : musicSource === "generated" && bgmUrl ? (
-                  <p className="curate-status-meta">Unique music bed ready for this story.</p>
+                  <p className="curate-status-meta">Music for this story is ready.</p>
                 ) : null}
-                <p className="curate-status-hint">Change by talking with Curator.</p>
+                <p className="curate-status-hint">Talk above if you want different music.</p>
               </div>
 
               <div className="curate-voice-row">
                 <p className="curate-voice-label">
                   {voiceLabel ||
                     (voiceEnrolled
-                      ? "Narration: your voice"
-                      : "Narration: default voice — Curator can help you enroll")}
+                      ? "This story uses your voice."
+                      : "This story uses a standard voice until you record your own.")}
                 </p>
                 {voiceHint ? <p className="curate-status-meta">{voiceHint}</p> : null}
                 {!voiceEnrolled ? (

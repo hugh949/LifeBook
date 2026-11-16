@@ -4,8 +4,8 @@ with OpenAI Images (gpt-image-1), and serve the signed result.
 from __future__ import annotations
 
 import base64
-import io
 import logging
+import os
 from uuid import uuid4
 
 import httpx
@@ -26,7 +26,8 @@ router = APIRouter(prefix="/me/avatar", tags=["me_avatar"])
 
 
 OPENAI_IMAGE_EDIT_URL = "https://api.openai.com/v1/images/edits"
-OPENAI_IMAGE_MODEL = "gpt-image-1"
+# gpt-image-1 is not on this account. 1.5 is the edit model that keeps a likeness.
+OPENAI_IMAGE_MODEL = (os.getenv("OPENAI_IMAGE_MODEL") or "gpt-image-1.5").strip()
 PENCIL_PROMPT = (
     "A clean black-and-white pencil-sketch cartoon portrait of the person in this "
     "photo. Head and shoulders, soft shading, textured pencil strokes, plain white "

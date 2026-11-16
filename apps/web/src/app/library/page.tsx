@@ -29,19 +29,18 @@ const TABS: {
 }[] = [
   {
     id: "conversations",
-    label: "Conversations",
-    blurb: "Opens Conversation on the story screen. Script, Curate, and Share stay there.",
+    label: "Talks",
+    blurb: "Talks you have recorded. Open one to hear it or turn it into a story.",
   },
   {
     id: "stories",
-    label: "Scripts",
-    blurb: "Opens Script on the same screen. Edit, hear, then Curate or Share when you choose.",
+    label: "Stories",
+    blurb: "Stories written from your talks. Open one to listen or share it.",
   },
   {
     id: "shared",
     label: "Shared",
-    blurb:
-      "Opens Share so you can revise the script and create a new link. Remove an old link when that access should stop.",
+    blurb: "Stories your family can open with a link.",
   },
 ];
 
@@ -137,16 +136,6 @@ export default function LibraryPage() {
 
   const activeBlurb = TABS.find((t) => t.id === tab)?.blurb ?? "";
 
-  const needsScript = useMemo(() => {
-    if (!items) return [];
-    return items.filter((it) => it.kind === "conversation" && !it.script_id).sort(byNewest);
-  }, [items]);
-
-  const needsCurate = useMemo(() => {
-    if (!items) return [];
-    return items.filter((it) => it.kind === "story" && !it.has_photo && !it.has_share).sort(byNewest);
-  }, [items]);
-
   const onDelete = async (it: LibraryItem) => {
     const key = `${it.kind}:${it.id}`;
     setDeletingKey(key);
@@ -170,11 +159,8 @@ export default function LibraryPage() {
 
   return (
     <>
-      <h1 className="page-title">Library</h1>
-      <p className="page-lead">
-        Your personal vault. Open any item and stay on one screen for Conversation, Script, Curate,
-        and Share.
-      </p>
+      <h1 className="page-title">Memories</h1>
+      <p className="page-lead">Open a memory, or record a new one. Nothing is shared until you say so.</p>
 
       <div className="library-tabs" role="tablist" aria-label="Library sections">
         {TABS.map((t) => (
@@ -204,38 +190,6 @@ export default function LibraryPage() {
         </div>
       ) : null}
 
-      {items && tab === "conversations" && needsScript.length > 0 ? (
-        <div className="library-nudge" role="status">
-          <p>
-            {needsScript.length === 1
-              ? "You have a conversation ready for a Script."
-              : `${needsScript.length} conversations are ready for a Script.`}
-          </p>
-          <div className="btn-row">
-            <Link
-              href={`/library/conversations/${needsScript[0].id}?stage=conversation`}
-              className="btn btn-primary"
-            >
-              Continue in Conversation
-            </Link>
-          </div>
-        </div>
-      ) : null}
-
-      {items && tab === "stories" && needsCurate.length > 0 ? (
-        <div className="library-nudge" role="status">
-          <p>Finish Curate — music, tone, voice, optional photo — before sharing.</p>
-          <div className="btn-row">
-            <Link
-              href={`/library/stories/${needsCurate[0].id}?stage=curate`}
-              className="btn btn-primary"
-            >
-              Finish Curate
-            </Link>
-          </div>
-        </div>
-      ) : null}
-
       {visible === null ? (
         <div className="empty-state">
           <p className="text-muted">Loading…</p>
@@ -247,15 +201,15 @@ export default function LibraryPage() {
           </div>
           <p>
             {tab === "shared"
-              ? "Nothing shared yet. Finish a script you love listening to, then create a link from Share."
+              ? "Nothing shared yet. Open a story, then share it with your family."
               : tab === "stories"
-                ? "No scripts yet. Finish a talk and the script is written for you."
-                : "No conversations yet. Start a new memory on Create."}
+                ? "No stories yet. Record a talk and a story is written for you."
+                : "No talks yet. Record a memory when you are ready."}
           </p>
           {tab !== "shared" ? (
             <p style={{ marginTop: 12 }}>
               <Link href="/talk" className="btn btn-primary">
-                Start a new memory
+                Record a memory
               </Link>
             </p>
           ) : null}
@@ -267,8 +221,8 @@ export default function LibraryPage() {
             const name = recallName(it);
             const key = `${it.kind}:${it.id}`;
             const when = formatStamp(stampOf(it));
-            const blurb = (it.summary || it.excerpt || "").trim();
-            const showBlurb = blurb && blurb !== name && !looksLikeRawId(blurb);
+            const blurb = clip((it.summary || it.excerpt || "").trim(), 110);
+            const showBlurb = Boolean(blurb) && blurb !== name && !looksLikeRawId(blurb);
             const confirming = confirmKey === key;
             return (
               <article key={key} className="library-card">
@@ -276,23 +230,11 @@ export default function LibraryPage() {
                   <div className="row-title">{name}</div>
                   {when ? <div className="row-time">{when}</div> : null}
                   {showBlurb ? <div className="row-sub">{blurb}</div> : null}
-                  <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <span className="row-chip">{it.kind === "story" ? "script" : "conversation"}</span>
-                    {it.kind === "conversation" && it.script_id ? (
-                      <span className="row-chip">Script ready</span>
-                    ) : null}
-                    {it.has_photo ? <span className="row-chip">photo</span> : null}
-                    {it.has_share ? (
-                      <span className="row-chip">shared</span>
-                    ) : (
-                      <span
-                        className="row-chip"
-                        style={{ background: "transparent", color: "var(--ink-faint)" }}
-                      >
-                        only you
-                      </span>
-                    )}
-                  </div>
+                  {it.has_share ? (
+                    <div style={{ marginTop: 6 }}>
+                      <span className="row-chip">Shared with family</span>
+                    </div>
+                  ) : null}
                 </Link>
                 {confirming ? (
                   <div className="library-confirm" role="group" aria-label={`Confirm delete ${name}`}>
@@ -317,14 +259,14 @@ export default function LibraryPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="btn-row">
-                    <Link className="btn btn-primary" href={href}>
-                      {tab === "shared" ? "Revise & share" : "Open"}
+                  <>
+                    <Link className="btn btn-primary btn-block" href={href}>
+                      Open
                     </Link>
-                    <button type="button" className="btn btn-danger" onClick={() => setConfirmKey(key)}>
+                    <button type="button" className="stage-quiet-delete" onClick={() => setConfirmKey(key)}>
                       Delete
                     </button>
-                  </div>
+                  </>
                 )}
               </article>
             );

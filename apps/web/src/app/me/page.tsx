@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState, FormEvent } from "react";
 import Link from "next/link";
 import { apiDelete, apiGet, apiPatch } from "@/lib/api";
 import { useAuth, Me } from "@/app/components/AuthContext";
-import AgentTeam from "@/app/components/AgentTeam";
 
 type VoiceStatus = { status: string; voice_id: string | null; consent_at: string | null; error: string | null };
 type AvatarStatus = { status: string; original_url: string | null; pencil_url: string | null; error: string | null };
@@ -157,7 +156,7 @@ export default function MePage() {
   return (
     <>
       <h1 className="page-title">Me</h1>
-      <p className="page-lead">Your voice and avatar for listening to your own stories.</p>
+      <p className="page-lead">Your name, your voice, and a picture. Stories stay private until you share them.</p>
 
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="section-title" style={{ marginTop: 0 }}>Account</div>
@@ -210,9 +209,9 @@ export default function MePage() {
         aria-label="Security settings"
       >
         <div className="row-main">
-          <div className="row-title">Security</div>
+          <div className="row-title">Extra sign-in check</div>
           <div className="row-sub">
-            Optional two-factor authentication with an authenticator app.
+            Optional. Add a code from an authenticator app when you sign in.
           </div>
         </div>
         <span
@@ -222,7 +221,7 @@ export default function MePage() {
             color: me?.totp_enabled ? "var(--success)" : "var(--ink-muted)",
           }}
         >
-          {me?.totp_enabled ? "2FA on" : "2FA off"}
+          {me?.totp_enabled ? "On" : "Off"}
         </span>
       </Link>
 
@@ -235,7 +234,7 @@ export default function MePage() {
         <div className="row-main">
           <div className="row-title">Your voice</div>
           <div className="row-sub">
-            Clone your voice so your stories can be narrated in your voice.
+            Record it once so stories can be read aloud in your voice.
           </div>
         </div>
         <span className={`row-chip`} style={{ background: voiceReady ? "var(--success-bg)" : "var(--accent-soft)", color: voiceReady ? "var(--success)" : "var(--ink-muted)" }}>
@@ -263,9 +262,9 @@ export default function MePage() {
             <div style={{ width: 44, height: 44, borderRadius: "50%", background: "var(--accent-soft)" }} />
           )}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="row-title">Your pencil-sketch avatar</div>
+            <div className="row-title">Your picture</div>
             <div className="row-sub">
-              A friendly stylized portrait for your story narrations.
+              A simple portrait that can appear with your stories.
             </div>
           </div>
         </div>
@@ -276,9 +275,8 @@ export default function MePage() {
 
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="section-title" style={{ marginTop: 0 }}>What LifeBook remembers</div>
-        <p className="text-muted" style={{ margin: "0 0 12px", fontSize: 14, lineHeight: 1.45 }}>
-          Private to you. LifeBook learns automatically from how you talk and the stories you keep —
-          tone, length, themes, and what to treat gently — so you correct less over time.
+        <p className="text-muted" style={{ margin: "0 0 12px", fontSize: 16, lineHeight: 1.45 }}>
+          Private notes about how you like to talk. Only you can see them.
         </p>
 
         {prefsLoading ? (
@@ -358,17 +356,6 @@ export default function MePage() {
             </button>
           ) : null}
         </div>
-      </div>
-
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="section-title" style={{ marginTop: 0 }}>About</div>
-        <p className="text-muted" style={{ margin: "0 0 12px", fontSize: 14, lineHeight: 1.45 }}>
-          Private first. Your specialists guide Create — Conversation → Script → Curate → share later.
-          Sharing stays optional.{" "}
-          <Link href="/talk">See how it works on Create</Link>.
-        </p>
-        <div className="me-team-heading">Your team</div>
-        <AgentTeam />
       </div>
 
       <div className="btn-row" style={{ marginTop: 20 }}>
