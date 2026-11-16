@@ -10,6 +10,10 @@ type Props = {
   mmss?: string;
   isBusy?: boolean;
   isListening?: boolean;
+  /** Talk step keeps a filled button. Later steps keep the mic visible, but quiet, until it is on. */
+  emphasis?: "primary" | "optional";
+  /** Label when the mic is off and this step’s main job is something else. */
+  idleLabel?: string;
   onStart: () => void;
   onEnd: () => void;
 };
@@ -22,6 +26,8 @@ export default function VoiceDock({
   mmss,
   isBusy,
   isListening,
+  emphasis = "primary",
+  idleLabel = "Tap to talk",
   onStart,
   onEnd,
 }: Props) {
@@ -46,6 +52,8 @@ export default function VoiceDock({
           ? "Saving your talk…"
           : "Microphone is off";
 
+  const quiet = emphasis === "optional" && !active && status !== "saving";
+
   const hint =
     status === "listening"
       ? "Speak now. Tap finish when this part feels complete."
@@ -55,7 +63,9 @@ export default function VoiceDock({
           ? "Stay here. The next step opens on this screen."
           : status === "error"
             ? coachHint
-            : "Tap the button, then speak. Nothing is heard until you do.";
+            : quiet
+              ? coachHint
+              : "Tap the button, then speak. Nothing is heard until you do.";
 
   const label =
     status === "connecting"
@@ -66,10 +76,16 @@ export default function VoiceDock({
           ? "Saving…"
           : status === "error"
             ? "Try again"
-            : "Tap to talk";
+            : quiet
+              ? idleLabel
+              : "Tap to talk";
 
   return (
-    <div className={`talk-bar is-${micState}`} role="region" aria-label={`${agentLabel} microphone`}>
+    <div
+      className={`talk-bar is-${micState}${quiet ? " is-quiet" : ""}`}
+      role="region"
+      aria-label={`${agentLabel} microphone`}
+    >
       <div className="talk-bar-status" aria-live="polite">
         <span className="talk-bar-dot" aria-hidden />
         <span>{statusLine}</span>

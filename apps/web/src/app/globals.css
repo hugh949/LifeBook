@@ -829,6 +829,26 @@ label.field span.label-text { color: var(--ink); font-weight: 500; }
 .talk-bar.is-idle .talk-bar-btn {
   box-shadow: 0 2px 0 rgba(28, 61, 78, 0.15);
 }
+.talk-bar.is-quiet.is-idle,
+.talk-bar.is-quiet.is-error {
+  gap: 6px;
+  padding: 10px 12px;
+}
+.talk-bar.is-quiet.is-idle .talk-bar-status,
+.talk-bar.is-quiet.is-error .talk-bar-status {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+.talk-bar.is-quiet.is-idle .talk-bar-btn,
+.talk-bar.is-quiet.is-error .talk-bar-btn {
+  background: transparent;
+  color: var(--primary);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  font-size: 16px;
+  font-weight: 600;
+}
 .talk-bar-btn:disabled {
   opacity: 0.7;
   cursor: wait;
@@ -972,9 +992,11 @@ label.field span.label-text { color: var(--ink); font-weight: 500; }
   border-radius: 999px;
   transition: background 0.2s ease, transform 0.12s ease, opacity 0.2s ease;
 }
-.script-hear-btn.is-playing {
-  background: var(--ink);
-  border-color: var(--ink);
+.script-hear-btn.is-playing,
+.script-hear-btn.is-playing:hover:not(:disabled) {
+  background: var(--success-bg);
+  border-color: var(--success);
+  color: var(--ink);
 }
 .script-player-slot {
   width: 100%;

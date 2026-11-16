@@ -20,8 +20,8 @@ function writeU32Le(arr: Uint8Array, offset: number, value: number): void {
   arr[offset + 3] = (value >> 24) & 0xff;
 }
 
-/** Build 44-byte WAV header for 16-bit mono at 16 kHz. Returns a Uint8Array so the header is always a copy. */
-function buildWavHeader(numSamples: number): Uint8Array {
+/** Build 44-byte WAV header for 16-bit mono. Returns a Uint8Array so the header is always a copy. */
+function buildWavHeader(numSamples: number, sampleRate: number = WAV_SAMPLE_RATE): Uint8Array {
   const dataLen = numSamples * 2; // 16-bit = 2 bytes per sample
   const arr = new Uint8Array(WAV_HEADER_LENGTH);
   let o = 0;
@@ -34,8 +34,8 @@ function buildWavHeader(numSamples: number): Uint8Array {
   writeU32Le(arr, o, 16); o += 4;
   writeU16Le(arr, o, 1); o += 2;  // PCM
   writeU16Le(arr, o, 1); o += 2;  // mono
-  writeU32Le(arr, o, WAV_SAMPLE_RATE); o += 4;
-  writeU32Le(arr, o, WAV_SAMPLE_RATE * 2); o += 4; // byte rate
+  writeU32Le(arr, o, sampleRate); o += 4;
+  writeU32Le(arr, o, sampleRate * 2); o += 4; // byte rate
   writeU16Le(arr, o, 2); o += 2;  // block align
   writeU16Le(arr, o, 16); o += 2; // bits per sample
   // data chunk
@@ -44,10 +44,20 @@ function buildWavHeader(numSamples: number): Uint8Array {
   return arr;
 }
 
-/** Convert float [-1,1] to Int16 and optionally resample to 16 kHz. */
-function floatTo16kHzPcm(input: Float32Array, inputSampleRate: number): Int16Array {
+function floatToInt16(sample: number): number {
+  const s = Math.max(-1, Math.min(1, sample));
+  return s < 0 ? Math.round(s * 32768) : Math.round(s * 32767);
+}
+
+/** Convert float [-1,1] to Int16, resampling when the rates differ. */
+function floatToPcm(input: Float32Array, inputSampleRate: number, outputSampleRate: number): Int16Array {
   if (input.length === 0) return new Int16Array(0);
-  const ratio = inputSampleRate / WAV_SAMPLE_RATE;
+  if (inputSampleRate === outputSampleRate) {
+    const out = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i++) out[i] = floatToInt16(input[i]);
+    return out;
+  }
+  const ratio = inputSampleRate / outputSampleRate;
   const outLength = Math.floor(input.length / ratio);
   const out = new Int16Array(outLength);
   for (let i = 0; i < outLength; i++) {
@@ -56,10 +66,14 @@ function floatTo16kHzPcm(input: Float32Array, inputSampleRate: number): Int16Arr
     const frac = srcIndex - idx;
     const next = Math.min(idx + 1, input.length - 1);
     const sample = input[idx] * (1 - frac) + input[next] * frac;
-    const s16 = Math.max(-32768, Math.min(32767, Math.round(sample * 32767)));
-    out[i] = s16;
+    out[i] = floatToInt16(sample);
   }
   return out;
+}
+
+/** Convert float [-1,1] to Int16 and resample to 16 kHz. */
+function floatTo16kHzPcm(input: Float32Array, inputSampleRate: number): Int16Array {
+  return floatToPcm(input, inputSampleRate, WAV_SAMPLE_RATE);
 }
 
 export type WavRecorderRolling = {
@@ -67,14 +81,26 @@ export type WavRecorderRolling = {
   getWavBlob: () => Blob | null;
 };
 
-/** Keep last `durationSeconds` of audio at 16 kHz in a ring buffer; call getWavBlob() to get current buffer as WAV. */
+export type WavRecorderOptions = {
+  /** "native" keeps the microphone rate. Voice cloning needs that. Omit for 16 kHz. */
+  sampleRate?: number | "native";
+};
+
+/** Keep the last `durationSeconds` of audio; call getWavBlob() to get the current buffer as WAV. */
 export function createWavRecorderRolling(
   stream: MediaStream,
-  durationSeconds: number = 60
+  durationSeconds: number = 60,
+  options?: WavRecorderOptions
 ): WavRecorderRolling {
   const ctx = new AudioContext();
   const source = ctx.createMediaStreamSource(stream);
-  const bufferLength = WAV_SAMPLE_RATE * durationSeconds; // samples
+  const sampleRate =
+    options?.sampleRate === "native"
+      ? ctx.sampleRate
+      : options?.sampleRate && options.sampleRate > 0
+        ? options.sampleRate
+        : WAV_SAMPLE_RATE;
+  const bufferLength = Math.floor(sampleRate * durationSeconds);
   const ring = new Int16Array(bufferLength);
   let writeIndex = 0;
   let totalWritten = 0;
@@ -82,7 +108,7 @@ export function createWavRecorderRolling(
   const processor = ctx.createScriptProcessor(4096, 1, 1);
   processor.onaudioprocess = (e) => {
     const input = e.inputBuffer.getChannelData(0);
-    const pcm = floatTo16kHzPcm(input, ctx.sampleRate);
+    const pcm = floatToPcm(input, ctx.sampleRate, sampleRate);
     for (let i = 0; i < pcm.length; i++) {
       ring[writeIndex % bufferLength] = pcm[i];
       writeIndex++;
@@ -109,7 +135,7 @@ export function createWavRecorderRolling(
       const count = Math.min(totalWritten, bufferLength);
       if (count === 0) return null;
       const start = totalWritten <= bufferLength ? 0 : writeIndex % bufferLength;
-      const header = buildWavHeader(count);
+      const header = buildWavHeader(count, sampleRate);
       const data = new Uint8Array(header.length + count * 2);
       data.set(header, 0);
       for (let i = 0; i < count; i++) {

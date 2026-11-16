@@ -678,8 +678,18 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
         setPlaybackDuration(duration);
         setAudioReady(true);
         if (fromStart || n.ended) n.currentTime = 0;
-        startBgm(fromStart || n.currentTime < 0.05, preview?.bgm_track || bgmTrack, preview?.bgm_url || bgmUrl);
-        syncBgmToNarrationRef.current = true;
+        // Script review is the voice reading the words. Music starts on Finish.
+        if (stage === "script") {
+          syncBgmToNarrationRef.current = false;
+          const bed = bgmRef.current;
+          if (bed) {
+            bed.pause();
+            bed.muted = true;
+          }
+        } else {
+          startBgm(fromStart || n.currentTime < 0.05, preview?.bgm_track || bgmTrack, preview?.bgm_url || bgmUrl);
+          syncBgmToNarrationRef.current = true;
+        }
         await n.play();
         setPlaying(true);
         setPreviewError(null);
@@ -693,7 +703,7 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
         return false;
       }
     },
-    [bgmTrack, bgmUrl, preview?.bgm_track, preview?.bgm_url, startBgm]
+    [bgmTrack, bgmUrl, preview?.bgm_track, preview?.bgm_url, stage, startBgm]
   );
 
   /** After blob URL is set on state, wire <audio>, wait for metadata, then play. */
@@ -720,9 +730,18 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
         setPreviewLoading(false);
         if (playWhenReadyRef.current) {
           playWhenReadyRef.current = false;
-          // BGM should already be running from Listen click (user gesture). Re-assert play.
-          startBgm(false, preview?.bgm_track || bgmTrack, preview?.bgm_url || bgmUrl);
-          syncBgmToNarrationRef.current = true;
+          if (stage === "script") {
+            syncBgmToNarrationRef.current = false;
+            const bed = bgmRef.current;
+            if (bed) {
+              bed.pause();
+              bed.muted = true;
+            }
+          } else {
+            // BGM should already be running from Listen click (user gesture). Re-assert play.
+            startBgm(false, preview?.bgm_track || bgmTrack, preview?.bgm_url || bgmUrl);
+            syncBgmToNarrationRef.current = true;
+          }
           n.currentTime = 0;
           await n.play();
           if (cancelled || gen !== hearGenRef.current) return;
@@ -744,7 +763,7 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
     return () => {
       cancelled = true;
     };
-  }, [audioSrc, bgmTrack, bgmUrl, preview?.bgm_track, preview?.bgm_url, startBgm]);
+  }, [audioSrc, bgmTrack, bgmUrl, preview?.bgm_track, preview?.bgm_url, stage, startBgm]);
 
   /** Prepare preview metadata + fetch MP3 as blob (credentials), then play via effect. */
   const loadPreview = async (autoPlay = true) => {
@@ -760,12 +779,10 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
     const toneName = toneLabel(narrationTone);
     const moodBit =
       normalizeBgmTrack(bgmTrack) === "none" ? "voice only (no music)" : `${moodName} music`;
-    const nextHint =
-      stage === "curate"
-        ? "You can keep waiting, or tap Continue to Share."
-        : "You can keep waiting, or tap Continue to Curate.";
     setStatusNote(
-      `Preparing with ${moodBit} · ${toneName} tone… This can take a few minutes. ${nextHint}`
+      stage === "script"
+        ? "Preparing the voice that reads your script. Music waits until Finish."
+        : `Preparing with ${moodBit} · ${toneName} tone…`
     );
 
     const gen = ++hearGenRef.current;
@@ -829,12 +846,20 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
       setPreview(p);
       setAudioSrc(objectUrl);
       const readyMood =
-        normalizeBgmTrack(p.bgm_track) === "none"
+        stage === "script"
           ? "voice only"
-          : p.bgm_url
-            ? `unique music under ${toneLabel(p.narration_tone || undefined)} voice`
-            : `${bgmLabel(p.bgm_track)} under ${toneLabel(p.narration_tone || undefined)} voice`;
-      if (!voiceNote) setStatusNote(`Ready — ${readyMood}.`);
+          : normalizeBgmTrack(p.bgm_track) === "none"
+            ? "voice only"
+            : p.bgm_url
+              ? `unique music under ${toneLabel(p.narration_tone || undefined)} voice`
+              : `${bgmLabel(p.bgm_track)} under ${toneLabel(p.narration_tone || undefined)} voice`;
+      if (!voiceNote) {
+        setStatusNote(
+          stage === "script"
+            ? "Ready — voice only. Add finishing touches when it sounds like you."
+            : `Ready — ${readyMood}.`
+        );
+      }
       // metadata + play handled in audioSrc effect
     } catch (e) {
       if (gen !== hearGenRef.current) return;
@@ -868,8 +893,20 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
       void startPlayback(n.ended || n.currentTime <= 0.05);
       return;
     }
-    // Unlock + start BGM in the same user gesture as Listen (before async fetch).
-    startBgm(true, bgmTrack, bgmUrl);
+    // Finish previews the music bed. The script step is the voice alone.
+    if (stage === "script") {
+      syncBgmToNarrationRef.current = false;
+      const bed = bgmRef.current;
+      if (bed) {
+        bed.pause();
+        bed.muted = true;
+      }
+    } else {
+      const bed = bgmRef.current;
+      if (bed) bed.muted = false;
+      // Unlock + start BGM in the same user gesture as Listen (before async fetch).
+      startBgm(true, bgmTrack, bgmUrl);
+    }
     void loadPreview(true);
   };
 
@@ -1172,7 +1209,7 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
       : currentStep === "script"
         ? scriptDirty
           ? "These edits aren’t saved yet. Continue will save them, then open the finishing touches."
-          : "This is your script. Change a word if it doesn’t sound like you, or add music and tone next."
+          : "Play the script if you want to hear it. When it sounds like you, add finishing touches."
         : !voiceEnrolled
           ? "I suggest the music and how it should sound. A default voice works until you record your own. A photo is optional. When it feels right, share it below."
           : "I suggest the music and how it should sound. Talk if you want them changed. A photo is optional. When it feels right, share it below.");
@@ -1197,10 +1234,12 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
         : isActuallyPlaying
           ? "Pause"
           : audioReady && audioSrc && !scriptDirty
-            ? "Play"
+            ? stage === "script"
+              ? "Play the script"
+              : "Play"
             : stage === "curate"
               ? "Listen"
-              : "Hear";
+              : "Play the script";
 
   const onScrub = (value: number) => {
     const n = narrationRef.current;
@@ -1270,7 +1309,12 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
       />
       <audio
         ref={bgmRef}
-        src={resolveBgmSrc(preview?.bgm_track || bgmTrack, preview?.bgm_url || bgmUrl)}
+        src={
+          stage === "script"
+            ? undefined
+            : resolveBgmSrc(preview?.bgm_track || bgmTrack, preview?.bgm_url || bgmUrl)
+        }
+        muted={stage === "script"}
         preload="auto"
         loop
         aria-hidden
@@ -1473,8 +1517,12 @@ export default function StudioScreen({ routeKind }: { routeKind: "conversation" 
               currentStep === "conversation"
                 ? "Tap to talk, then speak. Tap to finish and the script starts."
                 : currentStep === "script"
-                  ? "You can talk to change the wording. The script stays on this screen."
-                  : "You can talk to change the music or the tone."
+                  ? "Optional. Talk only if you want the wording changed."
+                  : "Optional. Talk only if you want the music or tone changed."
+            }
+            emphasis={currentStep === "conversation" ? "primary" : "optional"}
+            idleLabel={
+              currentStep === "script" ? "Talk to change the wording" : "Talk to change the music"
             }
             status={session.status}
             message={session.message}

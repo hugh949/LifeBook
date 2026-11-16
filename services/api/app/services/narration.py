@@ -41,13 +41,26 @@ _TONE_INSTRUCTIONS = {
     ),
 }
 
-# ElevenLabs multilingual v2: stability / similarity / style (0–1) per tone so differences are audible.
-_TONE_ELEVENLABS = {
-    "warm": {"stability": 0.42, "similarity_boost": 0.78, "style": 0.35, "use_speaker_boost": True},
-    "gentle": {"stability": 0.62, "similarity_boost": 0.72, "style": 0.12, "use_speaker_boost": True},
-    "clear": {"stability": 0.55, "similarity_boost": 0.7, "style": 0.05, "use_speaker_boost": True},
-    "lively": {"stability": 0.28, "similarity_boost": 0.8, "style": 0.55, "use_speaker_boost": True},
+# Likeness first. Style exaggeration and very low stability pull the clone away from the recording.
+# Tone only changes how steady the reading is.
+_CLONE_SIMILARITY = 0.88
+_TONE_STABILITY = {
+    "warm": 0.55,
+    "gentle": 0.64,
+    "clear": 0.58,
+    "lively": 0.50,
 }
+
+
+def cloned_voice_settings(narration_tone: str | None = None) -> dict:
+    """ElevenLabs settings that keep the curated reading close to the captured voice."""
+    tone = (narration_tone or "warm").strip().lower()
+    return {
+        "stability": _TONE_STABILITY.get(tone, 0.55),
+        "similarity_boost": _CLONE_SIMILARITY,
+        "style": 0.0,
+        "use_speaker_boost": True,
+    }
 
 
 def voice_enrollment_snapshot(db: Session, owner_user_id: str) -> dict:
@@ -124,7 +137,7 @@ def synthesize_narration_mp3(
         addon = story_specific_tts_addon(text, tone_key)
         if addon:
             style = f"{style}{addon}"
-    eleven_settings = _TONE_ELEVENLABS.get(tone_key) or _TONE_ELEVENLABS["warm"]
+    eleven_settings = cloned_voice_settings(tone_key)
 
     voice_row = (
         db.query(models.UserVoice)

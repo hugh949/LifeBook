@@ -6,7 +6,9 @@ The UI is stateful and polls ``GET /me/voice`` to advance.
 """
 from __future__ import annotations
 
+import io
 import logging
+import wave
 from datetime import datetime, timezone
 
 import httpx
@@ -18,14 +20,17 @@ from app.core.config import settings
 from app.core.security import get_current_user
 from app.db import models
 from app.db.session import get_db
-from app.services.audio_convert import to_wav_16k_mono
+from app.services.audio_convert import to_wav_voice_sample
+from app.services.narration import cloned_voice_settings
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/me/voice", tags=["me_voice"])
 
 
-NARRATION_VOICE_MIN_BYTES = 1_920_000  # ~60s at 16 kHz 16-bit mono
+MIN_CLONE_SECONDS = 60
+# Floor only. Real gate is duration, so a 44.1/48 kHz minute is not rejected as "too short".
+NARRATION_VOICE_MIN_BYTES = 50_000
 ELEVENLABS_ADD_VOICE_URL = "https://api.elevenlabs.io/v1/voices/add"
 ELEVENLABS_TTS_URL_TEMPLATE = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 ELEVENLABS_DELETE_VOICE_TEMPLATE = "https://api.elevenlabs.io/v1/voices/{voice_id}"
@@ -48,6 +53,31 @@ def _ensure_user_voice(db: Session, user_id: str) -> models.UserVoice:
         db.commit()
         db.refresh(row)
     return row
+
+
+def _wav_duration_seconds(data: bytes) -> float | None:
+    try:
+        with wave.open(io.BytesIO(data), "rb") as wf:
+            rate = wf.getframerate()
+            frames = wf.getnframes()
+            if rate <= 0 or frames <= 0:
+                return None
+            return frames / float(rate)
+    except Exception:
+        return None
+
+
+def _delete_elevenlabs_voice(api_key: str, voice_id: str) -> None:
+    if not api_key or not voice_id:
+        return
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            client.delete(
+                ELEVENLABS_DELETE_VOICE_TEMPLATE.format(voice_id=voice_id),
+                headers={"xi-api-key": api_key},
+            )
+    except Exception as e:
+        logger.warning("me/voice: ElevenLabs delete failed voice_id=%s err=%s", voice_id, e)
 
 
 def _to_status(row: models.UserVoice) -> VoiceStatusOut:
@@ -91,13 +121,19 @@ async def create_clone(
         )
     content_type = getattr(audio, "content_type", "") or ""
     if not (body[:4] == b"RIFF" and body[8:12] == b"WAVE"):
-        converted = to_wav_16k_mono(body, content_type)
+        converted = to_wav_voice_sample(body, content_type)
         if not converted:
             raise HTTPException(
                 status_code=400,
                 detail="Audio format not supported. Please record as WAV.",
             )
         body = converted
+    duration = _wav_duration_seconds(body)
+    if duration is None or duration < MIN_CLONE_SECONDS:
+        raise HTTPException(
+            status_code=400,
+            detail="Please record at least 60 seconds of clear speech.",
+        )
 
     row = _ensure_user_voice(db, str(current_user.id))
     row.clone_status = "processing"
@@ -105,14 +141,31 @@ async def create_clone(
     db.commit()
 
     name = f"lifebook-{current_user.id}"
+    previous_id = (row.elevenlabs_voice_id or "").strip()
     try:
         with httpx.Client(timeout=120.0) as client:
-            r = client.post(
-                ELEVENLABS_ADD_VOICE_URL,
-                headers={"xi-api-key": api_key},
-                files={"files": ("audio.wav", body, "audio/wav")},
-                data={"name": name, "remove_background_noise": "true"},
-            )
+            def _add_voice() -> httpx.Response:
+                return client.post(
+                    ELEVENLABS_ADD_VOICE_URL,
+                    headers={"xi-api-key": api_key},
+                    files={"files": ("audio.wav", body, "audio/wav")},
+                    data={
+                        "name": name,
+                        # Leave the recording intact. Denoising here thins the voice and makes it less like you.
+                        "remove_background_noise": "false",
+                    },
+                )
+
+            r = _add_voice()
+            if r.status_code == 400 and previous_id:
+                try:
+                    detail_code = str((r.json().get("detail") or {}).get("status") or "")
+                except Exception:
+                    detail_code = ""
+                if detail_code == "voice_limit_reached":
+                    _delete_elevenlabs_voice(api_key, previous_id)
+                    previous_id = ""
+                    r = _add_voice()
         r.raise_for_status()
         data = r.json()
         voice_id = (data.get("voice_id") or "").strip()
@@ -129,7 +182,11 @@ async def create_clone(
                         "Accept": "audio/mpeg",
                     },
                     params={"output_format": "mp3_44100_128"},
-                    json={"text": "Hello.", "model_id": "eleven_multilingual_v2"},
+                    json={
+                        "text": "Hello.",
+                        "model_id": "eleven_multilingual_v2",
+                        "voice_settings": cloned_voice_settings("clear"),
+                    },
                 )
             tts_r.raise_for_status()
             if not tts_r.content or len(tts_r.content) < 100:
@@ -172,6 +229,8 @@ async def create_clone(
         db.commit()
         raise HTTPException(status_code=502, detail=str(e))
 
+    if previous_id and previous_id != voice_id:
+        _delete_elevenlabs_voice(api_key, previous_id)
     row.elevenlabs_voice_id = voice_id
     row.elevenlabs_voice_consent_at = datetime.now(timezone.utc)
     row.clone_status = "ready"
@@ -205,7 +264,11 @@ def voice_sample(
                     "Accept": "audio/mpeg",
                 },
                 params={"output_format": "mp3_44100_128"},
-                json={"text": SAMPLE_SENTENCE, "model_id": "eleven_multilingual_v2"},
+                json={
+                    "text": SAMPLE_SENTENCE,
+                    "model_id": "eleven_multilingual_v2",
+                    "voice_settings": cloned_voice_settings("clear"),
+                },
             )
         r.raise_for_status()
         return Response(content=r.content, media_type="audio/mpeg")

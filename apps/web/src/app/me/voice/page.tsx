@@ -131,9 +131,16 @@ export default function VoicePage() {
   const startRecording = async () => {
     setError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      });
       streamRef.current = stream;
-      recRef.current = createWavRecorderRolling(stream, 120);
+      recRef.current = createWavRecorderRolling(stream, 120, { sampleRate: "native" });
 
       const ctx = new AudioContext();
       ctxRef.current = ctx;
@@ -354,7 +361,7 @@ export default function VoicePage() {
         <div className="card stack-12">
           <div className="msg msg-success">Your voice clone is ready.</div>
           <p className="text-muted" style={{ margin: 0, fontSize: 14 }}>
-            Your stories can be narrated in your voice when you listen privately or share.
+            Play the sample. If it does not sound like you, record again in a quiet room, in your normal voice.
           </p>
           <div className="btn-row">
             <button className="btn btn-primary" onClick={playSample} disabled={sampleBusy}>
@@ -376,13 +383,13 @@ export default function VoicePage() {
       ) : (
         <div className="card stack-12">
           <p style={{ margin: 0 }}>
-            Find a quiet spot. Tap <strong>Start recording</strong>, then speak naturally for at
-            least a minute &mdash; read a favorite paragraph or describe your day.
+            Find a quiet spot. Tap <strong>Start recording</strong>, then speak in your normal voice
+            for at least a minute &mdash; read a favorite paragraph or describe your day.
           </p>
           <ul style={{ margin: 0, paddingLeft: 18, color: "var(--ink-muted)", fontSize: 14 }}>
-            <li>Use your normal phone mic at arm&rsquo;s length.</li>
-            <li>No background music or TV.</li>
-            <li>60+ seconds of clear speech.</li>
+            <li>Hold the phone a short distance from your mouth.</li>
+            <li>No background music, TV, or other voices.</li>
+            <li>60+ seconds, the way you usually talk.</li>
           </ul>
           <div className="btn-row">
             <button className="btn btn-primary" onClick={startRecording}>Start recording</button>
