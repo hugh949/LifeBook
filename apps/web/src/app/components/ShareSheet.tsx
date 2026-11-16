@@ -18,9 +18,19 @@ type Props = {
   targetId: string;
   open: boolean;
   onClose: () => void;
+  /** Render on the story screen instead of a separate sheet. */
+  embedded?: boolean;
+  onActiveCount?: (count: number) => void;
 };
 
-export default function ShareSheet({ targetType, targetId, open, onClose }: Props) {
+export default function ShareSheet({
+  targetType,
+  targetId,
+  open,
+  onClose,
+  embedded = false,
+  onActiveCount,
+}: Props) {
   const [password, setPassword] = useState("");
   const [changePasswordFor, setChangePasswordFor] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState("");
@@ -31,7 +41,7 @@ export default function ShareSheet({ targetType, targetId, open, onClose }: Prop
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) {
+    if (!open && !embedded) {
       setPassword("");
       setChangePasswordFor(null);
       setNewPassword("");
@@ -40,17 +50,20 @@ export default function ShareSheet({ targetType, targetId, open, onClose }: Prop
       return;
     }
     apiGet<ShareOut[]>("/shares")
-      .then((all) =>
-        setExisting(
-          all.filter(
-            (s) => s.target_type === targetType && s.target_id === targetId && !s.revoked_at
-          )
-        )
-      )
-      .catch(() => setExisting([]));
-  }, [open, targetType, targetId]);
+      .then((all) => {
+        const rows = all.filter(
+          (s) => s.target_type === targetType && s.target_id === targetId && !s.revoked_at
+        );
+        setExisting(rows);
+        onActiveCount?.(rows.length);
+      })
+      .catch(() => {
+        setExisting([]);
+        onActiveCount?.(0);
+      });
+  }, [open, embedded, targetType, targetId, onActiveCount]);
 
-  if (!open) return null;
+  if (!embedded && !open) return null;
 
   const onCreate = async () => {
     setError(null);
@@ -66,7 +79,11 @@ export default function ShareSheet({ targetType, targetId, open, onClose }: Prop
         target_id: targetId,
         password: pw,
       });
-      setExisting((prev) => (prev ? [s, ...prev] : [s]));
+      setExisting((prev) => {
+        const next = prev ? [s, ...prev] : [s];
+        onActiveCount?.(next.length);
+        return next;
+      });
       setPassword("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create share link.");
@@ -91,7 +108,11 @@ export default function ShareSheet({ targetType, targetId, open, onClose }: Prop
     if (!confirm("Remove access for this link? Anyone with it will no longer be able to open it.")) return;
     try {
       await apiDelete(`/shares/${encodeURIComponent(token)}`);
-      setExisting((prev) => (prev ?? []).filter((s) => s.token !== token));
+      setExisting((prev) => {
+        const next = (prev ?? []).filter((s) => s.token !== token);
+        onActiveCount?.(next.length);
+        return next;
+      });
       if (changePasswordFor === token) {
         setChangePasswordFor(null);
         setNewPassword("");
@@ -123,16 +144,16 @@ export default function ShareSheet({ targetType, targetId, open, onClose }: Prop
     }
   };
 
-  return (
-    <div className="sheet-overlay" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+  const body = (
+    <>
         <h2 style={{ margin: "0 0 10px", fontSize: "1.1rem", fontWeight: 700 }}>
           Who can listen
         </h2>
         <p className="text-muted" style={{ margin: "0 0 14px", fontSize: 14 }}>
           This stays private to you until you create a password-protected link. Share the link and
           password only when you choose — not a public post. You can change the password or remove
-          access anytime.
+          access anytime. To revise the words, open Script, edit, and Save, then create a new link
+          here. Remove an old link if that access should stop. Existing links play the current script.
         </p>
 
         <div className="stack-12">
@@ -227,9 +248,22 @@ export default function ShareSheet({ targetType, targetId, open, onClose }: Prop
           </ul>
         )}
 
-        <div className="btn-row" style={{ marginTop: 16, justifyContent: "flex-end" }}>
-          <button className="btn btn-ghost" onClick={onClose}>Done</button>
-        </div>
+        {embedded ? null : (
+          <div className="btn-row" style={{ marginTop: 16, justifyContent: "flex-end" }}>
+            <button className="btn btn-ghost" onClick={onClose}>Done</button>
+          </div>
+        )}
+    </>
+  );
+
+  if (embedded) {
+    return <div className="stage-share">{body}</div>;
+  }
+
+  return (
+    <div className="sheet-overlay" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        {body}
       </div>
     </div>
   );

@@ -6,6 +6,14 @@ LifeBook uses env vars in a few places. Here’s how they relate so you only upd
 > before opening the app to real users &mdash; it signs the session cookies. A
 > generator one-liner: `python -c "import secrets; print(secrets.token_urlsafe(64))"`.
 > Changing it later signs everyone out but is otherwise safe.
+>
+> **Forgot password / email:** outbound mail uses plain SMTP (`SMTP_HOST`,
+> `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_TLS`).
+> Also set `APP_ENV=production` and `PUBLIC_APP_URL` (prod web origin) on the
+> API Container App. Without SMTP, Forgot password still returns HTTP 200 and
+> stores a reset token, but **no email is sent**. Locally (`APP_ENV=local`),
+> the API returns a `dev_reset_url` in the JSON instead. Add the SMTP_* keys as
+> GitHub Actions secrets so `deploy-api.yml` can push them to ACA.
 
 ---
 

@@ -267,6 +267,15 @@ jobs:
           AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
           AZURE_SPEECH_REGION: ${{ secrets.AZURE_SPEECH_REGION }}
           AZURE_SPEECH_ENDPOINT: ${{ secrets.AZURE_SPEECH_ENDPOINT }}
+          # Auth / password-reset (optional SMTP — without it, Forgot password creates a token but sends no email)
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          PUBLIC_APP_URL: ${{ vars.PUBLIC_APP_URL || secrets.PUBLIC_APP_URL || 'https://app-lifebook-web-v1.azurewebsites.net' }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_USE_TLS: ${{ secrets.SMTP_USE_TLS }}
         run: |
           set -e
           echo "==> Deploying to Container App ${{ env.CONTAINER_APP }} (image: ${{ env.IMAGE }})..."
@@ -284,6 +293,13 @@ jobs:
           [ -n "$AZURE_SPEECH_KEY" ] && echo "  AZURE_SPEECH_KEY: set" || echo "  AZURE_SPEECH_KEY: (empty)"
           [ -n "$AZURE_SPEECH_REGION" ] && echo "  AZURE_SPEECH_REGION: set" || echo "  AZURE_SPEECH_REGION: (empty)"
           [ -n "$AZURE_SPEECH_ENDPOINT" ] && echo "  AZURE_SPEECH_ENDPOINT: set" || echo "  AZURE_SPEECH_ENDPOINT: (empty)"
+          [ -n "$SESSION_SECRET" ] && echo "  SESSION_SECRET: set" || echo "  SESSION_SECRET: (empty — keep existing ACA value if already set)"
+          echo "  APP_ENV: production"
+          echo "  PUBLIC_APP_URL: ${PUBLIC_APP_URL:-unset}"
+          [ -n "$SMTP_HOST" ] && echo "  SMTP_HOST: set" || echo "  SMTP_HOST: (empty — Forgot password will NOT send email)"
+          [ -n "$SMTP_FROM" ] && echo "  SMTP_FROM: set" || echo "  SMTP_FROM: (empty)"
+          [ -n "$SMTP_USER" ] && echo "  SMTP_USER: set" || echo "  SMTP_USER: (empty)"
+          [ -n "$SMTP_PASSWORD" ] && echo "  SMTP_PASSWORD: set" || echo "  SMTP_PASSWORD: (empty)"
           # Brief wait so any just-finished operation can clear (was 2 min; 30s is enough when app is idle)
           echo "Waiting 30s before container app update..."
           sleep 30
@@ -302,6 +318,16 @@ jobs:
           [ -n "$AZURE_SPEECH_KEY" ] && ENV_VARS+=( "AZURE_SPEECH_KEY=$AZURE_SPEECH_KEY" )
           [ -n "$AZURE_SPEECH_REGION" ] && ENV_VARS+=( "AZURE_SPEECH_REGION=$AZURE_SPEECH_REGION" )
           [ -n "$AZURE_SPEECH_ENDPOINT" ] && ENV_VARS+=( "AZURE_SPEECH_ENDPOINT=$AZURE_SPEECH_ENDPOINT" )
+          # Always pin production auth env so Forgot password never returns local-only reset URLs
+          ENV_VARS+=( "APP_ENV=production" )
+          [ -n "$PUBLIC_APP_URL" ] && ENV_VARS+=( "PUBLIC_APP_URL=$PUBLIC_APP_URL" )
+          [ -n "$SESSION_SECRET" ] && ENV_VARS+=( "SESSION_SECRET=$SESSION_SECRET" )
+          [ -n "$SMTP_HOST" ] && ENV_VARS+=( "SMTP_HOST=$SMTP_HOST" )
+          [ -n "$SMTP_PORT" ] && ENV_VARS+=( "SMTP_PORT=$SMTP_PORT" )
+          [ -n "$SMTP_USER" ] && ENV_VARS+=( "SMTP_USER=$SMTP_USER" )
+          [ -n "$SMTP_PASSWORD" ] && ENV_VARS+=( "SMTP_PASSWORD=$SMTP_PASSWORD" )
+          [ -n "$SMTP_FROM" ] && ENV_VARS+=( "SMTP_FROM=$SMTP_FROM" )
+          [ -n "$SMTP_USE_TLS" ] && ENV_VARS+=( "SMTP_USE_TLS=$SMTP_USE_TLS" )
           ENV_VARS+=( "PORT=80" )
           # Ingress must target port 80 to match app (Azure Container Apps expects 80 unless overridden)
           az containerapp ingress update -g ${{ env.RESOURCE_GROUP }} -n ${{ env.CONTAINER_APP }} --target-port 80 --output none

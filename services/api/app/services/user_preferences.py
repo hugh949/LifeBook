@@ -316,6 +316,23 @@ def reset_prefs() -> dict[str, Any]:
     return {}
 
 
+def preferred_language_name(db: Session, user_id: str) -> str | None:
+    """Saved language preference, if the person set one. Empty / auto counts as unset."""
+    try:
+        row = db.query(models.UserPreferences).filter(models.UserPreferences.user_id == user_id).first()
+    except Exception:
+        return None
+    if not row or not isinstance(row.prefs_json, dict):
+        return None
+    lang = row.prefs_json.get("language")
+    if not isinstance(lang, str):
+        return None
+    cleaned = lang.strip()
+    if not cleaned or cleaned.lower() in {"auto", "null", "none"}:
+        return None
+    return cleaned
+
+
 def preference_notes_for_prompt(db: Session, user_id: str) -> str | None:
     try:
         row = db.query(models.UserPreferences).filter(models.UserPreferences.user_id == user_id).first()

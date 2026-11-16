@@ -10,7 +10,7 @@ from app.core.security import get_current_user
 from app.db import models
 from app.db.session import get_db
 from app.services.ai_recall import generate_recall_label
-from app.services.user_preferences import learn_from_content_job
+from app.services.user_preferences import learn_from_content_job, preferred_language_name
 
 
 logger = logging.getLogger(__name__)
@@ -220,7 +220,12 @@ def session_complete(
         participant_text = _participant_text(all_turns)
         api_key = (settings.openai_api_key or "").strip()
         if participant_text and api_key:
-            ai_summary, ai_tags = generate_recall_label(participant_text, api_key)
+            ai_summary, ai_tags = generate_recall_label(
+                participant_text,
+                api_key,
+                language_code=conversation.language,
+                preferred_language=preferred_language_name(db, str(current_user.id)),
+            )
             if ai_summary:
                 conversation.summary = ai_summary
             if ai_tags:

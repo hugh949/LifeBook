@@ -44,7 +44,7 @@ function CreateInner() {
     persistConversation: true,
     allowHandoff: false,
     onConversationSaved: (conversationId) => {
-      router.replace(`/library/conversations/${encodeURIComponent(conversationId)}`);
+      router.replace(`/library/conversations/${encodeURIComponent(conversationId)}?advance=script`);
     },
     onReadyForScript: () => {
       // After first save redirects; derive happens in Conversation Studio
@@ -62,11 +62,23 @@ function CreateInner() {
 
   return (
     <>
+      {showDock ? (
+        <VoiceDock
+          agentLabel="Talk"
+          coachHint="Tap to talk, then speak. Tap to finish and the script starts."
+          status={session.status}
+          message={session.message}
+          mmss={session.mmss}
+          isBusy={session.isBusy}
+          isListening={session.isListening}
+          onStart={() => void session.start()}
+          onEnd={() => void session.endSession()}
+        />
+      ) : null}
       <h1 className="page-title">Create</h1>
       <p className="page-lead">
         {me?.display_name ? `Hi ${me.display_name}. ` : ""}
-        Start a new memory — then keep talking in Conversation Studio. Sharing is only later, if you
-        choose.
+        Start a new memory. Talk, then the script, then a few finishing touches — until it’s ready to share.
       </p>
 
       {!showDock ? (
@@ -75,8 +87,8 @@ function CreateInner() {
             <p className="detail-next-label">New memory</p>
             <p className="detail-next-title">Start a Conversation</p>
             <p className="detail-next-text">
-              Spill your heart with the Conversation companion. Your exact transcript opens in
-              Conversation Studio when you save — Script and Curate come next.
+              Tap Talk, then speak. The microphone stays off until you do. When you finish, the script
+              is written on the same screen, and finishing touches come after that.
             </p>
             <div className="btn-row">
               <button
@@ -102,25 +114,9 @@ function CreateInner() {
         </div>
       ) : (
         <div className="stack-12" style={{ marginBottom: 16 }}>
-          <p className="text-muted" style={{ margin: 0, fontSize: 14 }}>
-            {resumeId
-              ? "Continuing into Conversation Studio — talk here, then you’ll land on the transcript page."
-              : "New conversation — when you end & save, you’ll open Conversation Studio to keep going."}
-          </p>
-          <VoiceDock
-            agentLabel="Conversation"
-            coachHint="Speak naturally. End when you’re ready — we’ll open your studio."
-            status={session.status}
-            message={session.message}
-            mmss={session.mmss}
-            isBusy={session.isBusy}
-            isListening={session.isListening}
-            onStart={() => void session.start()}
-            onEnd={() => void session.endSession()}
-          />
           {session.status === "saved" ? (
             <p className="text-muted" style={{ fontSize: 14 }}>
-              Opening Conversation Studio…
+              Opening your story screen…
             </p>
           ) : null}
           {!session.isListening && session.status !== "connecting" && session.status !== "saving" ? (
@@ -142,7 +138,7 @@ function CreateInner() {
         How it works
       </h2>
       <p className="text-muted" style={{ margin: "0 0 12px", fontSize: 14, lineHeight: 1.45 }}>
-        Conversation → Script → Curate. Share later is optional access — not a craft stage.
+        Talk, Script, then Finish. Share is part of the last step, on the same screen.
       </p>
       <JourneySteps active={1} compact={!showDock} />
 

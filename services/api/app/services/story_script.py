@@ -10,6 +10,7 @@ from app.core.openai_models import storyteller_model
 from app.db import models
 from app.services.ai_recall import generate_story_title
 from app.services.openai_chat import chat_text
+from app.services.user_preferences import preferred_language_name
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,16 @@ def upsert_script_for_conversation(
     text = (story_text or "").strip()
     if not text:
         raise ValueError("Script text is required.")
-    title = generate_story_title(text, api_key) if api_key else None
+    title = (
+        generate_story_title(
+            text,
+            api_key,
+            language_code=conversation.language,
+            preferred_language=preferred_language_name(db, owner_user_id),
+        )
+        if api_key
+        else None
+    )
     if not title:
         title = "Story script"
     tag_list = tags

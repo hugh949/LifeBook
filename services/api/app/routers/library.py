@@ -39,7 +39,11 @@ from app.services.story_script import (
     find_script_for_conversation,
     upsert_script_for_conversation,
 )
-from app.services.user_preferences import get_or_create_prefs, learn_from_content_job
+from app.services.user_preferences import (
+    get_or_create_prefs,
+    learn_from_content_job,
+    preferred_language_name,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -56,6 +60,9 @@ class LibraryItem(BaseModel):
     summary: str | None
     tags: list[str]
     created_at: str
+    updated_at: str = ""
+    # Short recall line from the words themselves when a title is missing.
+    excerpt: str | None = None
     has_audio: bool = False
     has_share: bool = False
     script_id: str | None = None  # conversation → linked script
@@ -178,6 +185,53 @@ def _tags(v) -> list[str]:
     if not isinstance(v, list):
         return []
     return [str(t).strip() for t in v if str(t).strip()][:10]
+
+
+def _snippet(text: str | None, limit: int = 80) -> str | None:
+    raw = " ".join((text or "").split())
+    if not raw:
+        return None
+    if len(raw) <= limit:
+        return raw
+    cut = raw[: limit - 1].rsplit(" ", 1)[0].rstrip(".,;:—- ")
+    if len(cut) < 24:
+        cut = raw[: limit - 1].rstrip()
+    return cut + "…"
+
+
+def _iso(value: datetime | None) -> str:
+    return value.isoformat() if value else ""
+
+
+def _conversation_excerpt(conv: models.Conversation) -> str | None:
+    summary = _snippet(conv.summary)
+    if summary:
+        return summary
+    turns = conv.session_turns_json if isinstance(conv.session_turns_json, list) else []
+    user_bits: list[str] = []
+    other_bits: list[str] = []
+    for turn in turns:
+        if not isinstance(turn, dict):
+            continue
+        content = str(turn.get("content") or "").strip()
+        if not content:
+            continue
+        if str(turn.get("role") or "") == "user":
+            user_bits.append(content)
+        else:
+            other_bits.append(content)
+    for content in user_bits + other_bits:
+        snip = _snippet(content)
+        if snip:
+            return snip
+    return None
+
+
+def _story_excerpt(story: models.Story) -> str | None:
+    summary = _snippet(story.summary)
+    if summary:
+        return summary
+    return _snippet(story.story_text)
 
 
 def _signed(url: str | None) -> str | None:
@@ -303,7 +357,9 @@ def list_library(
                 title=(c.title or "").strip() or None,
                 summary=(c.summary or "").strip() or None,
                 tags=_tags(c.tags_json),
-                created_at=c.created_at.isoformat() if c.created_at else "",
+                created_at=_iso(c.created_at),
+                updated_at=_iso(c.updated_at) or _iso(c.created_at),
+                excerpt=_conversation_excerpt(c),
                 has_audio=bool(c.audio_asset_id),
                 has_share=has_share,
                 script_id=script_by_conv.get(str(c.id)),
@@ -322,14 +378,16 @@ def list_library(
                 title=(s.title or "").strip() or None,
                 summary=(s.summary or "").strip() or None,
                 tags=_tags(s.tags_json),
-                created_at=s.created_at.isoformat() if s.created_at else "",
+                created_at=_iso(s.created_at),
+                updated_at=_iso(s.updated_at) or _iso(s.created_at),
+                excerpt=_story_excerpt(s),
                 has_audio=bool(s.narration_asset_id),
                 has_share=has_share,
                 has_photo=bool(getattr(s, "photo_asset_id", None)),
                 source_conversation_id=str(s.source_conversation_id) if s.source_conversation_id else None,
             )
         )
-    out.sort(key=lambda it: it.created_at, reverse=True)
+    out.sort(key=lambda it: it.updated_at or it.created_at, reverse=True)
     return out
 
 
@@ -714,7 +772,15 @@ def confirm_story(
     if not text:
         raise HTTPException(status_code=400, detail="Story text is required.")
     api_key = (settings.openai_api_key or "").strip()
-    title = generate_story_title(text, api_key) if text else None
+    title = (
+        generate_story_title(
+            text,
+            api_key,
+            preferred_language=preferred_language_name(db, str(current_user.id)),
+        )
+        if text
+        else None
+    )
     if not title:
         title = "Story script"
 

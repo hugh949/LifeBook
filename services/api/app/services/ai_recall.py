@@ -9,29 +9,179 @@ from app.core.openai_models import (
 )
 from app.services.openai_chat import chat_text
 
+# Codes and names the product already offers, plus a few common variants.
+_LANGUAGE_NAMES = {
+    "en": "English",
+    "en-us": "English",
+    "en-gb": "English",
+    "english": "English",
+    "zh": "Chinese",
+    "zh-cn": "Chinese",
+    "zh-hans": "Chinese",
+    "zh-hant": "Chinese",
+    "chinese": "Chinese",
+    "中文": "Chinese",
+    "zh-yue": "Cantonese",
+    "yue": "Cantonese",
+    "cantonese": "Cantonese",
+    "es": "Spanish",
+    "spanish": "Spanish",
+    "ur": "Urdu",
+    "urdu": "Urdu",
+}
+_LANGUAGE_SCRIPTS = {
+    "english": "latin",
+    "spanish": "latin",
+    "chinese": "cjk",
+    "cantonese": "cjk",
+    "urdu": "arabic",
+}
+_SKIP_LANGUAGE = frozenset({"", "auto", "null", "none"})
+
 SYSTEM_PROMPT = """You are a helper that creates short labels for voice conversation recall.
 Given only what the person (the user) said in a conversation, output:
-1. A one-line summary (max 15 words) of what they talked about or wanted. Use the same language as the input. No filler like "The user said...".
-2. Four to six topic tags: nouns or key themes (e.g. wedding, medication, holiday). No greetings, fillers, or generic words (no "thanks", "yeah", "little", "kind"). Use the same language as the input.
+1. A one-line summary (max 15 words) of what they talked about or wanted. No filler like "The user said...".
+2. Four to six topic tags: nouns or key themes (e.g. wedding, medication, holiday). No greetings, fillers, or generic words (no "thanks", "yeah", "little", "kind").
 Output valid JSON only, no markdown: {"summary": "...", "tags": ["tag1", "tag2", ...]}"""
 
 
-def generate_recall_label(participant_text: str, api_key: str, model: str = "") -> tuple[str | None, list[str]]:
+def text_script(text: str) -> str:
+    """Dominant writing system: latin, cjk, arabic, or '' when there is too little text to tell."""
+    cjk = latin = arabic = 0
+    for ch in text or "":
+        o = ord(ch)
+        if 0x4E00 <= o <= 0x9FFF or 0x3400 <= o <= 0x4DBF:
+            cjk += 1
+        elif ("A" <= ch <= "Z") or ("a" <= ch <= "z") or 0x00C0 <= o <= 0x024F:
+            latin += 1
+        elif 0x0600 <= o <= 0x06FF or 0x0750 <= o <= 0x077F:
+            arabic += 1
+    counts = {"cjk": cjk, "latin": latin, "arabic": arabic}
+    total = cjk + latin + arabic
+    if total < 2:
+        return ""
+    best = max(counts, key=counts.get)
+    if counts[best] / total < 0.6:
+        return ""
+    # Short Latin tokens ("TV", "ok") are not enough to call the language.
+    # A couple of Chinese or Urdu characters are already a clear script.
+    if best == "latin" and latin < 8:
+        return ""
+    return best
+
+
+def _clean_language(value: str | None) -> str:
+    raw = (value or "").strip()
+    if raw.lower() in _SKIP_LANGUAGE:
+        return ""
+    return _LANGUAGE_NAMES.get(raw.lower(), raw)
+
+
+def recall_language_name(
+    text: str,
+    *,
+    language_code: str | None = None,
+    preferred_language: str | None = None,
+) -> str:
+    """Language the summary/title must use.
+
+    A saved preference wins. Otherwise use the conversation language code when
+    it agrees with the words. If the code's script disagrees with the transcript,
+    follow the transcript so English talk is not labeled in another language.
+    """
+    preferred = _clean_language(preferred_language)
+    if preferred:
+        return preferred
+    code = (language_code or "").strip().lower().replace("_", "-")
+    coded = _LANGUAGE_NAMES.get(code) or _LANGUAGE_NAMES.get(code.split("-")[0] if code else "")
+    spoken = text_script(text)
+    if coded:
+        expected = _LANGUAGE_SCRIPTS.get(coded.lower())
+        if expected and spoken and expected != spoken:
+            coded = ""
+        else:
+            return coded
+    if spoken == "cjk":
+        return "Chinese"
+    if spoken == "arabic":
+        return "Urdu"
+    return "the same language as the input"
+
+
+def _expected_script(language_name: str, source_text: str) -> str:
+    named = _LANGUAGE_SCRIPTS.get((language_name or "").strip().lower())
+    if named:
+        return named
+    return text_script(source_text)
+
+
+def _matches_script(candidate: str, expected: str) -> bool:
+    if not expected:
+        return True
+    got = text_script(candidate)
+    if not got:
+        return True
+    return got == expected
+
+
+def _labels_match(summary: str | None, tags: list[str], expected: str) -> bool:
+    """Reject a summary or tag whose writing system is not the one we asked for."""
+    parts = [summary or "", *[t for t in tags if t]]
+    return all(_matches_script(part, expected) for part in parts)
+
+
+def _language_lock(language_name: str) -> str:
+    return (
+        f"LANGUAGE LOCK: Write only in {language_name}. "
+        "Do not translate into any other language. "
+        "The summary and tags must stay in that language even if you would usually answer in a different one."
+    )
+
+
+def generate_recall_label(
+    participant_text: str,
+    api_key: str,
+    model: str = "",
+    *,
+    language_code: str | None = None,
+    preferred_language: str | None = None,
+) -> tuple[str | None, list[str]]:
     """
     Call OpenAI to produce a one-line summary and topic tags from participant-only text.
-    Returns (summary, tags). On failure or empty input, returns (None, []).
-    Multilingual: model uses same language as input.
+    Returns (summary, tags). On failure, empty input, or a wrong-language draft, returns (None, []).
+    Uses the person's language preference when set, otherwise the transcript language.
     Uses Content Manager (Agent 4) model by default — light inventory labeling.
     """
     text = (participant_text or "").strip()
     if not text or not api_key:
         return None, []
 
+    language_name = recall_language_name(
+        text, language_code=language_code, preferred_language=preferred_language
+    )
+    expected = _expected_script(language_name, text)
+    system = f"{SYSTEM_PROMPT}\n\n{_language_lock(language_name)}"
+    summary, tags = _request_recall_label(api_key, model, system, text)
+    if summary and not _labels_match(summary, tags, expected):
+        summary, tags = _request_recall_label(
+            api_key,
+            model,
+            system + f"\nYour previous draft used the wrong language. Answer again in {language_name} only.",
+            text,
+        )
+    if not summary or not _labels_match(summary, tags, expected):
+        return None, []
+    return summary, tags
+
+
+def _request_recall_label(
+    api_key: str, model: str, system: str, text: str
+) -> tuple[str | None, list[str]]:
     content = chat_text(
         api_key=api_key,
         model=content_manager_model(model),
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system},
             {"role": "user", "content": text[:8000]},
         ],
         max_completion_tokens=400,
@@ -45,24 +195,51 @@ def generate_recall_label(participant_text: str, api_key: str, model: str = "") 
 
 
 STORY_TITLE_PROMPT = """You are a helper that creates a short, descriptive title for a family story.
-Given the story text (from a voice conversation or narrative), output a single line: a title of 4 to 10 words that captures the main theme or subject. Use the same language as the input. No quotes, no "Title:", no filler.
+Given the story text (from a voice conversation or narrative), output a single line: a title of 4 to 10 words that captures the main theme or subject. No quotes, no "Title:", no filler.
 Output only the title line, nothing else."""
 
 
-def generate_story_title(story_content: str, api_key: str, model: str = "") -> str | None:
+def generate_story_title(
+    story_content: str,
+    api_key: str,
+    model: str = "",
+    *,
+    language_code: str | None = None,
+    preferred_language: str | None = None,
+) -> str | None:
     """
     Call OpenAI to produce a short title (4–10 words) from story content.
-    Returns the title string or None on failure/empty input.
+    Returns the title string or None on failure, empty input, or a wrong-language draft.
+    Uses the person's language preference when set, otherwise the story's language.
     Uses Storyteller (Agent 2) model by default.
     """
     text = (story_content or "").strip()
     if not text or not api_key:
         return None
+    language_name = recall_language_name(
+        text, language_code=language_code, preferred_language=preferred_language
+    )
+    expected = _expected_script(language_name, text)
+    system = f"{STORY_TITLE_PROMPT}\n\n{_language_lock(language_name)}"
+    title = _request_story_title(api_key, model, system, text)
+    if title and not _matches_script(title, expected):
+        title = _request_story_title(
+            api_key,
+            model,
+            system + f"\nYour previous draft used the wrong language. Answer again in {language_name} only.",
+            text,
+        )
+    if not title or not _matches_script(title, expected):
+        return None
+    return title
+
+
+def _request_story_title(api_key: str, model: str, system: str, text: str) -> str | None:
     title = chat_text(
         api_key=api_key,
         model=storyteller_model(model),
         messages=[
-            {"role": "system", "content": STORY_TITLE_PROMPT},
+            {"role": "system", "content": system},
             {"role": "user", "content": text[:6000]},
         ],
         max_completion_tokens=200,
@@ -73,7 +250,7 @@ def generate_story_title(story_content: str, api_key: str, model: str = "") -> s
     if not title:
         return None
     title = title.strip().strip('"').strip()
-    return title if title else None
+    return title or None
 
 
 NARRATE_MUSIC_PROMPT_SYSTEM = """You write a short prompt for an AI music generator. The music is a soft looping bed under a spoken personal/family story (voiceover).

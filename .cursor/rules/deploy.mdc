@@ -1,0 +1,12 @@
+---
+description: When Hugh says deploy, run the LifeBook release script
+alwaysApply: true
+---
+
+# Deploy
+
+When Hugh says **deploy** (or “ship it”), run `./scripts/deploy.sh` from the repo root. Do not ask him to confirm the routine steps.
+
+The script syncs `main` with origin, typechecks, runs core QA on the local app, commits, pushes, deploys web and API, then checks production. If a check fails, stop. Do not push or deploy a failing tree.
+
+Never commit `.env`, `.env.local`, or `.env.azure`. Deploy only from `main`, only to the existing Azure West US 3 app. Do not start this script for any other request.

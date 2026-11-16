@@ -33,50 +33,64 @@ export default function VoiceDock({
         ? "connecting"
         : status === "saving"
           ? "saving"
-          : "idle";
+          : status === "error"
+            ? "error"
+            : "idle";
+
+  const statusLine =
+    status === "listening"
+      ? `Microphone is on${mmss ? ` · ${mmss}` : ""}`
+      : status === "connecting"
+        ? "Connecting the microphone…"
+        : status === "saving"
+          ? "Saving your talk…"
+          : "Microphone is off";
+
+  const hint =
+    status === "listening"
+      ? "Speak now. Tap finish when this part feels complete."
+      : status === "connecting"
+        ? "One moment. Tap cancel if you didn’t mean to start."
+        : status === "saving"
+          ? "Stay here. The next step opens on this screen."
+          : status === "error"
+            ? coachHint
+            : "Tap the button, then speak. Nothing is heard until you do.";
 
   const label =
     status === "connecting"
-      ? "Cancel…"
+      ? "Cancel"
       : status === "listening"
-        ? "End talk"
+        ? "Tap to finish"
         : status === "saving"
           ? "Saving…"
           : status === "error"
             ? "Try again"
-            : `Talk with ${agentLabel}`;
+            : "Tap to talk";
 
   return (
-    <div className="voice-dock">
-      <div className="voice-dock-agent">{agentLabel}</div>
-      <p className="voice-dock-hint text-muted">
-        {status === "listening"
-          ? "Listening — speak naturally. End when you’re ready."
-          : status === "connecting"
-            ? "Connecting — tap Cancel to stop."
-            : coachHint}
-      </p>
+    <div className={`talk-bar is-${micState}`} role="region" aria-label={`${agentLabel} microphone`}>
+      <div className="talk-bar-status" aria-live="polite">
+        <span className="talk-bar-dot" aria-hidden />
+        <span>{statusLine}</span>
+      </div>
+      <p className="talk-bar-hint">{hint}</p>
       <button
         type="button"
-        className="talk-mic voice-dock-mic"
-        data-state={micState}
+        className="talk-bar-btn"
+        aria-pressed={active}
         onClick={() => {
           if (active || isListening) onEnd();
           else if (!isBusy) onStart();
         }}
         disabled={status === "saving"}
-        aria-label={label}
       >
         {label}
-        {isListening && mmss ? (
-          <div style={{ marginTop: 8, fontSize: 13, fontWeight: 500, opacity: 0.9 }}>{mmss}</div>
-        ) : null}
       </button>
       {message ? (
         <div
           className={`msg ${status === "error" ? "msg-error" : status === "saved" ? "msg-success" : "msg-info"}`}
           role={status === "error" ? "alert" : "status"}
-          style={{ width: "100%", marginTop: 10 }}
         >
           {message}
         </div>

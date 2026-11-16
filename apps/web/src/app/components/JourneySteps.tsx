@@ -1,6 +1,6 @@
 "use client";
 
-export type JourneyStepId = 1 | 2 | 3 | 4;
+export type JourneyStepId = 1 | 2 | 3;
 
 export const JOURNEY_STEPS: {
   id: JourneyStepId;
@@ -10,27 +10,21 @@ export const JOURNEY_STEPS: {
 }[] = [
   {
     id: 1,
-    title: "Conversation",
+    title: "Talk",
     agent: "Conversation companion",
-    body: "Talk freely and continue anytime. We keep an exact transcript — private.",
+    body: "Tap Talk first, then speak. The microphone is off until you do. When you finish, the script starts on its own.",
   },
   {
     id: 2,
     title: "Script",
     agent: "Storyteller",
-    body: "One professional script from that talk. See it, hear it, edit until the wording feels right.",
+    body: "Your words, shaped into a story. Change anything that doesn’t sound like you.",
   },
   {
     id: 3,
-    title: "Curate",
+    title: "Finish",
     agent: "Curator",
-    body: "Music, speaking tone, your voice, and one optional photo — the memorable finish.",
-  },
-  {
-    id: 4,
-    title: "Share later",
-    agent: "Content manager",
-    body: "Optional access control. Password link; recipients hear (and see the photo) — not the app.",
+    body: "Music, tone, your voice, and an optional photo — then the story is ready to share.",
   },
 ];
 

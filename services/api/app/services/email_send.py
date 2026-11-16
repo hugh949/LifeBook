@@ -29,7 +29,8 @@ def send_email(*, to: str, subject: str, text_body: str) -> bool:
             if settings.smtp_use_tls:
                 smtp.starttls()
             user = (settings.smtp_user or "").strip()
-            password = settings.smtp_password or ""
+            # Gmail App Passwords are often copied with display spaces; strip all whitespace.
+            password = "".join((settings.smtp_password or "").split())
             if user:
                 smtp.login(user, password)
             smtp.send_message(msg)
